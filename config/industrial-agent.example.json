@@ -1,0 +1,8 @@
+{
+  "instanceRoot": "C:\\Games\\Minecraft\\SteveIndustrialAgent-Test",
+  "worldName": "Steve Industrial Agent Test",
+  "formalRoot": "C:\\Games\\Minecraft\\Important-Instances",
+  "requireDisposableWorld": true,
+  "allowNetwork": false,
+  "telemetry": false
+}

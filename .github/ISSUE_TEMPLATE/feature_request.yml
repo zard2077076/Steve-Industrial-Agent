@@ -1,0 +1,17 @@
+name: Feature request
+description: Propose a bounded, testable future capability
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Player problem
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Safe objective acceptance test
+    validations:
+      required: true

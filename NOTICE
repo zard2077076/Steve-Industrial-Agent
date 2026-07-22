@@ -1,0 +1,10 @@
+Steve Industrial Agent
+
+Design research references YuvDwi/Steve at commit
+034afb53ed383efcef0084616022c57d6d2b8c02.
+Upstream README.md and mods.toml label the project MIT, but that repository
+commit does not contain the full license grant or a standalone copyright
+notice. No upstream source code is copied in the current milestone. Upstream
+source must not be copied or used as a derivation base unless a complete,
+verifiable license grant and the required attribution/rightsholder information
+are obtained first.

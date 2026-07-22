@@ -1,0 +1,370 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+base {
+    archivesName = 'steve-industrial-agent'
+}
+
+// Create 6.0.6 asks Mixin to resolve its optional JourneyMap target even when
+// JourneyMap is absent. This run-only source set supplies only that target name
+// for create-only-client startup scanning. The target is never loaded by the
+// profile and is never part of the production binary or sources JAR.
+sourceSets {
+    createOnlyClientAcceptance
+}
+
+def runtimeProfile = providers.gradleProperty('industrialRuntimeProfile')
+        .orElse('development')
+        .get()
+def supportedRuntimeProfiles = [
+        'development',
+        'neither-server',
+        'create-only-server',
+        'neither-client',
+        'create-only-client'
+]
+if (!supportedRuntimeProfiles.contains(runtimeProfile)) {
+    throw new GradleException("Unsupported industrialRuntimeProfile '${runtimeProfile}'. "
+            + "Expected one of: ${supportedRuntimeProfiles.join(', ')}")
+}
+def recoveryReloadAcceptancePhase = providers
+        .gradleProperty('recoveryReloadAcceptancePhase')
+        .getOrNull()
+def c03RecoveryReloadAcceptancePhase = providers
+        .gradleProperty('c03RecoveryReloadAcceptancePhase')
+        .getOrNull()
+def c04RecoveryReloadAcceptancePhase = providers
+        .gradleProperty('c04RecoveryReloadAcceptancePhase')
+        .getOrNull()
+if (recoveryReloadAcceptancePhase != null
+        && !['write', 'read'].contains(recoveryReloadAcceptancePhase)) {
+    throw new GradleException("Unsupported recoveryReloadAcceptancePhase '${recoveryReloadAcceptancePhase}'. "
+            + "Expected 'write' or 'read'.")
+}
+if (c03RecoveryReloadAcceptancePhase != null
+        && !['write', 'read'].contains(c03RecoveryReloadAcceptancePhase)) {
+    throw new GradleException("Unsupported c03RecoveryReloadAcceptancePhase '${c03RecoveryReloadAcceptancePhase}'. "
+            + "Expected 'write' or 'read'.")
+}
+if (c04RecoveryReloadAcceptancePhase != null
+        && !['write', 'read'].contains(c04RecoveryReloadAcceptancePhase)) {
+    throw new GradleException("Unsupported c04RecoveryReloadAcceptancePhase '${c04RecoveryReloadAcceptancePhase}'. "
+            + "Expected 'write' or 'read'.")
+}
+if (c04RecoveryReloadAcceptancePhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c04RecoveryReloadAcceptancePhase and industrialRuntimeProfile cannot be combined')
+}
+if (c04RecoveryReloadAcceptancePhase != null
+        && (recoveryReloadAcceptancePhase != null
+        || c03RecoveryReloadAcceptancePhase != null
+        || [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest'
+        ].any { project.hasProperty(it) })) {
+    throw new GradleException(
+            'c04RecoveryReloadAcceptancePhase cannot be combined with another acceptance fixture')
+}
+if (c03RecoveryReloadAcceptancePhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c03RecoveryReloadAcceptancePhase and industrialRuntimeProfile cannot be combined')
+}
+if (c03RecoveryReloadAcceptancePhase != null
+        && (recoveryReloadAcceptancePhase != null
+        || c04RecoveryReloadAcceptancePhase != null
+        || [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest'
+        ].any { project.hasProperty(it) })) {
+    throw new GradleException(
+            'c03RecoveryReloadAcceptancePhase cannot be combined with another acceptance fixture')
+}
+if (recoveryReloadAcceptancePhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'recoveryReloadAcceptancePhase and industrialRuntimeProfile cannot be combined')
+}
+if (recoveryReloadAcceptancePhase != null
+        && [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'recoveryReloadAcceptancePhase cannot be combined with another acceptance fixture')
+}
+if (project.hasProperty('mekanismAbsentSmoke') && runtimeProfile != 'development') {
+    throw new GradleException('mekanismAbsentSmoke and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('createScanAcceptance') && runtimeProfile != 'development') {
+    throw new GradleException('createScanAcceptance and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('createScanAcceptance') && project.hasProperty('mekanismAbsentSmoke')) {
+    throw new GradleException('createScanAcceptance and mekanismAbsentSmoke cannot be combined')
+}
+if (project.hasProperty('createKineticsAcceptance') && runtimeProfile != 'development') {
+    throw new GradleException('createKineticsAcceptance and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('createKineticsAcceptance')
+        && (project.hasProperty('createScanAcceptance') || project.hasProperty('mekanismAbsentSmoke'))) {
+    throw new GradleException('createKineticsAcceptance cannot be combined with another server fixture')
+}
+if (project.hasProperty('createRuntimeRecipeCatalogAcceptance') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'createRuntimeRecipeCatalogAcceptance and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('createRuntimeRecipeCatalogAcceptance')
+        && [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'createRuntimeRecipeCatalogAcceptance cannot be combined with another server fixture')
+}
+if (project.hasProperty('createBeltPressGameTest') && runtimeProfile != 'development') {
+    throw new GradleException('createBeltPressGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('createBeltPressGameTest')
+        && (project.hasProperty('createProcessingGameTest')
+        || project.hasProperty('createScanAcceptance')
+        || project.hasProperty('createKineticsAcceptance')
+        || project.hasProperty('createRuntimeRecipeCatalogAcceptance')
+        || project.hasProperty('mekanismAbsentSmoke'))) {
+    throw new GradleException('createBeltPressGameTest cannot be combined with another acceptance fixture')
+}
+if (project.hasProperty('goalDrivenExecutionGameTest') && runtimeProfile != 'development') {
+    throw new GradleException('goalDrivenExecutionGameTest and industrialRuntimeProfile cannot be combined')
+}
+def selectedAcceptanceFixtures = [
+        'mekanismAbsentSmoke',
+        'createScanAcceptance',
+        'createKineticsAcceptance',
+        'createRuntimeRecipeCatalogAcceptance',
+        'createProcessingGameTest',
+        'createBeltPressGameTest',
+        'goalDrivenExecutionGameTest'
+].count { project.hasProperty(it) }
+selectedAcceptanceFixtures += recoveryReloadAcceptancePhase == null ? 0 : 1
+selectedAcceptanceFixtures += c03RecoveryReloadAcceptancePhase == null ? 0 : 1
+selectedAcceptanceFixtures += c04RecoveryReloadAcceptancePhase == null ? 0 : 1
+if (selectedAcceptanceFixtures > 1) {
+    throw new GradleException('goal-driven and established acceptance fixtures require separate isolated runs')
+}
+def includeCreateRuntime = !runtimeProfile.startsWith('neither-')
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'info'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile',
+                    project.layout.buildDirectory.file('createSrgToMcp/output.srg').get().asFile.absolutePath
+            mods {
+                steve_create_agent {
+                    source sourceSets.main
+                    source project(':core').sourceSets.main
+                    source project(':adapter-api').sourceSets.main
+                    if (runtimeProfile == 'create-only-client') {
+                        source sourceSets.createOnlyClientAcceptance
+                    }
+                }
+            }
+        }
+
+        client {
+            if (runtimeProfile.endsWith('-client')) {
+                workingDirectory project.file("run/profiles/${runtimeProfile}")
+                property 'steve_industrial.test.runtimeProfile', runtimeProfile
+            }
+        }
+        server {
+            args '--nogui'
+            if (project.hasProperty('mekanismAbsentSmoke')) {
+                workingDirectory project.file('run/mekanism-absent')
+                property 'steve_industrial.test.mekanismAbsent', 'true'
+            }
+            if (project.hasProperty('createScanAcceptance')) {
+                workingDirectory project.file('run/create-scan-acceptance')
+                property 'steve_industrial.test.createScanAcceptance', 'true'
+            }
+            if (project.hasProperty('createKineticsAcceptance')) {
+                workingDirectory project.file('run/create-kinetics-acceptance')
+                property 'steve_industrial.test.createKineticsAcceptance', 'true'
+            }
+            if (project.hasProperty('createRuntimeRecipeCatalogAcceptance')) {
+                def runtimeCatalogDir = project.file('run/create-runtime-recipe-catalog-acceptance')
+                workingDirectory runtimeCatalogDir
+                property 'steve_industrial.test.createRuntimeRecipeCatalogAcceptance', 'true'
+                property 'steve_industrial.deployment.expectedGameDir', runtimeCatalogDir.absolutePath
+                property 'steve_industrial.deployment.forbiddenRoot', 'D:/PCL2'
+            }
+            if (recoveryReloadAcceptancePhase != null) {
+                workingDirectory project.file('run/recovery-reload-acceptance')
+                property 'steve_industrial.test.recoveryReloadAcceptancePhase',
+                        recoveryReloadAcceptancePhase
+            }
+            if (c03RecoveryReloadAcceptancePhase != null) {
+                def c03RecoveryDir = project.file('run/c03-recovery-reload-acceptance')
+                workingDirectory c03RecoveryDir
+                property 'steve_industrial.test.c03RecoveryReloadAcceptancePhase',
+                        c03RecoveryReloadAcceptancePhase
+                property 'steve_industrial.execution.expectedGameDir', c03RecoveryDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+            }
+            if (c04RecoveryReloadAcceptancePhase != null) {
+                def c04RecoveryDir = project.file('run/c04-recovery-reload-acceptance')
+                workingDirectory c04RecoveryDir
+                property 'steve_industrial.test.c04RecoveryReloadAcceptancePhase',
+                        c04RecoveryReloadAcceptancePhase
+                property 'steve_industrial.execution.expectedGameDir', c04RecoveryDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+            }
+            if (runtimeProfile.endsWith('-server')) {
+                workingDirectory project.file("run/profiles/${runtimeProfile}")
+                property 'steve_industrial.test.runtimeProfile', runtimeProfile
+            }
+        }
+        gameTestServer {
+            if (project.hasProperty('createProcessingGameTest')) {
+                def processingRunDir = project.file('run/create-processing-gametest')
+                workingDirectory processingRunDir
+                // The deterministic empty structure is supplied by vanilla under the minecraft namespace.
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.createProcessingGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', processingRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+            } else if (project.hasProperty('createBeltPressGameTest')) {
+                def beltRunDir = project.file('run/create-belt-press-gametest')
+                workingDirectory beltRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.createBeltPressGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', beltRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+            } else if (project.hasProperty('goalDrivenExecutionGameTest')) {
+                def goalRunDir = project.file('run/goal-driven-execution-gametest')
+                workingDirectory goalRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', goalRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+            } else {
+                property 'forge.enabledGameTestNamespaces', mod_id
+            }
+        }
+    }
+}
+
+repositories {
+    maven { url = rootProject.file('work/local-maven') }
+    maven { url = 'https://maven.minecraftforge.net' }
+    maven { url = 'https://maven.createmod.net' }
+    maven { url = 'https://maven.ithundxr.dev/mirror' }
+    maven { url = 'https://raw.githubusercontent.com/Fuzss/modresources/main/maven/' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    implementation project(':core')
+    implementation project(':adapter-api')
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
+
+    // Direct Create references compile only inside internal/v606. Runtime profiles still decide
+    // whether any Create classes or supporting libraries are present when the game launches.
+    compileOnly(fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}:slim")) {
+        transitive = false
+    }
+    compileOnly fg.deobf("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}")
+    compileOnly fg.deobf("dev.engine-room.flywheel:flywheel-forge-api-${minecraft_version}:${flywheel_version}")
+    compileOnly fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
+    compileOnly annotationProcessor("io.github.llamalad7:mixinextras-common:${mixin_extras_version}")
+
+    if (includeCreateRuntime) {
+        runtimeOnly(fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}:slim")) {
+            transitive = false
+        }
+        runtimeOnly fg.deobf("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}")
+        runtimeOnly fg.deobf("dev.engine-room.flywheel:flywheel-forge-${minecraft_version}:${flywheel_version}")
+        runtimeOnly fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
+        runtimeOnly "io.github.llamalad7:mixinextras-forge:${mixin_extras_version}"
+    }
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    def replacements = [
+        minecraft_version: minecraft_version,
+        forge_version: forge_version,
+        mod_id: mod_id,
+        mod_name: mod_name,
+        mod_version: mod_version,
+        mod_authors: mod_authors,
+        release_version: project.version,
+        git_commit: rootProject.ext.releaseGitCommit,
+        build_timestamp: rootProject.ext.releaseGitTimestamp,
+        target_runtime_forge_version: target_runtime_forge_version,
+        dirty_worktree: rootProject.ext.releaseDirty
+    ]
+    inputs.properties replacements
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta',
+                   'steve-industrial-agent-release.properties']) {
+        expand replacements + [project: project]
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    from project(':core').sourceSets.main.output
+    from project(':adapter-api').sourceSets.main.output
+    from(rootProject.file('LICENSE')) {
+        into 'META-INF'
+        rename { 'LICENSE-steve-industrial-agent' }
+    }
+    from(rootProject.file('NOTICE')) {
+        into 'META-INF'
+        rename { 'NOTICE-steve-industrial-agent' }
+    }
+    manifest {
+        attributes([
+            'Specification-Title': 'Steve Industrial Agent',
+            'Specification-Vendor': mod_authors,
+            'Specification-Version': '1',
+            'Implementation-Title': 'Steve Industrial Agent',
+            'Implementation-Version': project.version,
+            'Implementation-Vendor': mod_authors,
+            'Git-Commit': rootProject.ext.releaseGitCommit,
+            'Build-Timestamp': rootProject.ext.releaseGitTimestamp,
+            'Minecraft-Version': minecraft_version,
+            'Forge-Version': target_runtime_forge_version,
+            'Create-Compatibility': '6.0.6',
+            'Dirty-Worktree': rootProject.ext.releaseDirty.toString(),
+            'Reproducible-Build': 'deterministic-jar-order-and-timestamps'
+        ])
+    }
+    finalizedBy 'reobfJar'
+}
+
+tasks.named('sourcesJar', Jar).configure {
+    from project(':core').sourceSets.main.allSource
+    from project(':adapter-api').sourceSets.main.allSource
+}

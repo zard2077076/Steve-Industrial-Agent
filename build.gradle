@@ -1,0 +1,61 @@
+import java.time.Instant
+
+def gitOutput = { List<String> arguments ->
+    def output = new ByteArrayOutputStream()
+    exec {
+        commandLine(['git'] + arguments)
+        standardOutput = output
+    }
+    output.toString('UTF-8').trim()
+}
+ext.releaseGitCommit = gitOutput(['rev-parse', 'HEAD'])
+ext.releaseGitTimestamp = Instant.ofEpochSecond(
+        gitOutput(['show', '-s', '--format=%ct', 'HEAD']).toLong()).toString()
+ext.releaseDirty = !gitOutput(['status', '--porcelain', '--untracked-files=normal']).isBlank()
+
+allprojects {
+    group = 'dev.stevecreate.agent'
+    version = '0.1.0-alpha.1'
+
+    repositories {
+        // Optional ignored bootstrap cache for hosts where Java cannot reach a vendor Maven.
+        maven { url = rootProject.file('work/local-maven') }
+        if (project.hasProperty('pcl2Root')) {
+            maven {
+                url = uri(new File(project.property('pcl2Root').toString(), '.minecraft/libraries'))
+                metadataSources {
+                    mavenPom()
+                    artifact()
+                }
+            }
+        }
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(17)
+        withSourcesJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.release = 17
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+            exceptionFormat 'full'
+        }
+    }
+
+    tasks.withType(Jar).configureEach {
+        preserveFileTimestamps = false
+        reproducibleFileOrder = true
+    }
+}

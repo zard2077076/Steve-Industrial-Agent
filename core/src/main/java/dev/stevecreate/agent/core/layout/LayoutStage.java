@@ -1,0 +1,12 @@
+package dev.stevecreate.agent.core.layout;
+
+public enum LayoutStage {
+    CONSTRAINT_VALIDATION,
+    GEOMETRY_RESOLUTION,
+    CANDIDATE_GENERATION,
+    PLACEMENT_VALIDATION,
+    ROUTING,
+    CAPACITY_VALIDATION,
+    GRAPH_ASSEMBLY,
+    PHYSICALIZATION_VERIFICATION
+}

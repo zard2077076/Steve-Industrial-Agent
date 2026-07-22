@@ -1,0 +1,20 @@
+package dev.stevecreate.agent.core.binding;
+
+/** Complete independent verification checklist for an implementation-bound graph. */
+public enum BindingVerificationCheck {
+    LOGICAL_IDENTITY_PRESERVED,
+    PROCESS_COVERAGE_EXACT,
+    IMPLEMENTATIONS_CATALOGED,
+    RUNTIME_MATCH,
+    CAPABILITIES_MATCH,
+    RECIPE_TYPES_MATCH,
+    ADAPTERS_AVAILABLE,
+    MODS_AVAILABLE,
+    PORT_CONTRACTS_MATCH,
+    POWER_CONTRACTS_MATCH,
+    EXECUTION_EVIDENCE_PRESENT,
+    QUANTITIES_PRESERVED,
+    INGREDIENT_IDENTITIES_PRESERVED,
+    GRAPH_ACYCLIC,
+    SELECTION_DETERMINISTIC
+}

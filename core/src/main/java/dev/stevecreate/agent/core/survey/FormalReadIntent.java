@@ -1,0 +1,13 @@
+package dev.stevecreate.agent.core.survey;
+
+public enum FormalReadIntent {
+    SAVE_ENUMERATION,
+    LEVEL_METADATA,
+    REGION_METADATA,
+    CHUNK_PAYLOAD,
+    INFRASTRUCTURE_DISCOVERY,
+    PERMISSION_METADATA,
+    FINGERPRINT_METADATA,
+    FINGERPRINT_CONTENT,
+    BACKUP_SOURCE
+}

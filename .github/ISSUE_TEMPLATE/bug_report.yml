@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible Alpha defect from a disposable test world
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not upload saves, playerdata, credentials, private logs, modpacks or third-party JARs.
+  - type: input
+    id: version
+    attributes:
+      label: Agent version and compatibility output
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Minimal reproduction
+      description: Include exact commands and expected/actual result.
+    validations:
+      required: true
+  - type: dropdown
+    id: disposable
+    attributes:
+      label: Disposable test world only?
+      options: ["Yes", "No"]
+    validations:
+      required: true

@@ -1,0 +1,15 @@
+# Copy to the test instance's config/steve-industrial-agent-common.toml.
+# The mod also creates this Forge config with fail-closed defaults on first launch.
+[runtime]
+configSchemaVersion = 1
+runtimeMode = "DISPOSABLE_TEST_WORLD"
+testInstanceRoot = "C:\\Games\\Minecraft\\SteveIndustrialAgent-Test"
+allowedTestWorlds = ["Steve Industrial Agent Test"]
+backupRoot = "C:\\Games\\SteveIndustrialAgent-Backups"
+importantInstanceRoots = ["C:\\Games\\Minecraft\\Important-Instances"]
+maxRegionSize = 32
+requireBackup = true
+requireWorldMarker = true
+allowDirectPilot = true
+diagnosticsRedaction = true
+formalWorldPolicy = "DENY_CONFIGURED_ROOTS"

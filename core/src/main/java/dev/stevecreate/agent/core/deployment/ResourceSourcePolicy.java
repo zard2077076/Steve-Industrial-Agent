@@ -1,0 +1,10 @@
+package dev.stevecreate.agent.core.deployment;
+
+public enum ResourceSourcePolicy {
+    TEST_FIXTURE_PROVIDED,
+    PLAYER_PROVIDED_READ_ONLY_SNAPSHOT,
+    DESIGNATED_CONTAINER,
+    EXISTING_NETWORK_READ_ONLY,
+    AUTO_WITHDRAW_FORBIDDEN,
+    UNSUPPORTED_SOURCE
+}

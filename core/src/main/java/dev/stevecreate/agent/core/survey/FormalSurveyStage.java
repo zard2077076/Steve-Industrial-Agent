@@ -1,0 +1,15 @@
+package dev.stevecreate.agent.core.survey;
+
+public enum FormalSurveyStage {
+    SAVE_DISCOVERY,
+    READ_ONLY_GUARD,
+    LEVEL_METADATA,
+    REGION_METADATA,
+    CHUNK_PARSE,
+    INFRASTRUCTURE_DISCOVERY,
+    CANDIDATE_SELECTION,
+    PERMISSION_DISCOVERY,
+    DRY_RUN_PREVIEW,
+    REPORTING,
+    FINGERPRINT_VERIFICATION
+}

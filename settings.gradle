@@ -1,0 +1,20 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.minecraftforge.net/' }
+        maven { url = 'https://maven.parchmentmc.org' }
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+rootProject.name = 'steve-create-agent'
+include 'core', 'adapter-api'
+
+// Keeps deterministic domain tests runnable on hosts that are temporarily unable to reach
+// Forge/Create Maven repositories. Full builds include the game module by default.
+if (!providers.gradleProperty('skipGameModules').map { it.toBoolean() }.getOrElse(false)) {
+    include 'forge-create-1.20.1'
+}

@@ -1,0 +1,60 @@
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
+}
+
+tasks.register('formalSurveyAcceptance', JavaExec) {
+    group = 'verification'
+    description = 'Runs the explicit development-only FS-12 guarded formal-world survey acceptance.'
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.stevecreate.agent.core.survey.FormalSurveyAcceptanceMain'
+    def requiredProperties = [
+            'formalProjectRoot', 'formalInstanceRoot', 'formalSaveRoot', 'formalWorldIdentity',
+            'formalLevelName', 'formalDataVersion', 'formalVersionName', 'formalDimensions'
+    ]
+    doFirst {
+        requiredProperties.each { name ->
+            if (!project.hasProperty(name)) throw new GradleException("Missing required -P${name}")
+            systemProperty name, project.property(name).toString()
+        }
+    }
+}
+
+tasks.register('formalBackupAcceptance', JavaExec) {
+    group = 'verification'
+    description = 'Runs the explicit FB-07 real formal-world READ-only-source backup acceptance.'
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.stevecreate.agent.core.formalbackup.FormalBackupAcceptanceMain'
+    def requiredProperties = [
+            'formalProjectRoot', 'formalPlatformRoot', 'formalInstanceRoot', 'formalSaveRoot',
+            'formalWorldIdentity', 'formalRuntimeFingerprint', 'formalExpectedSourceFingerprint',
+            'formalGitHead', 'formalQuiescenceObservedAt', 'formalEvidenceRoot', 'formalCandidateTsv'
+    ]
+    doFirst {
+        requiredProperties.each { name ->
+            if (!project.hasProperty(name)) throw new GradleException("Missing required -P${name}")
+            systemProperty name, project.property(name).toString()
+        }
+    }
+}
+
+tasks.register('writableTestWorldBackupAcceptance', JavaExec) {
+    group = 'verification'
+    description = 'Runs the IWP-05 closed isolated-world backup and disposable restore drill.'
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.stevecreate.agent.core.deployment.WritableTestWorldBackupAcceptanceMain'
+    def requiredProperties = [
+            'iwpProjectRoot', 'iwpInstanceRoot', 'iwpWorldRoot', 'iwpFormalRoot',
+            'iwpBackupRoot', 'iwpRunRoot', 'iwpWorldIdentity', 'iwpBackupIdentity'
+    ]
+    doFirst {
+        requiredProperties.each { name ->
+            if (!project.hasProperty(name)) throw new GradleException("Missing required -P${name}")
+            systemProperty name, project.property(name).toString()
+        }
+    }
+}

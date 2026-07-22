@@ -1,0 +1,18 @@
+name: Compatibility report
+description: Report a version/launcher compatibility result
+title: "[Compatibility] "
+labels: [compatibility]
+body:
+  - type: textarea
+    id: matrix
+    attributes:
+      label: Version matrix
+      description: Agent, Minecraft, Forge, Create, pack, Java, Windows and launcher versions.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Redacted compatibility output
+    validations:
+      required: true
