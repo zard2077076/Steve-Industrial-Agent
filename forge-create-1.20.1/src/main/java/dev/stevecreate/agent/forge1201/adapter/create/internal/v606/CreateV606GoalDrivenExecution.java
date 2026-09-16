@@ -4,22 +4,39 @@ import dev.stevecreate.agent.adapter.api.AdapterFailureCode;
 import dev.stevecreate.agent.adapter.api.AdapterResult;
 import dev.stevecreate.agent.adapter.api.BeltPressExecutionSession;
 import dev.stevecreate.agent.adapter.api.BeltPressExecutionUpdate;
+import dev.stevecreate.agent.adapter.api.BasinPressExecutionSession;
+import dev.stevecreate.agent.adapter.api.BasinPressExecutionUpdate;
+import dev.stevecreate.agent.adapter.api.BasinMixerExecutionSession;
+import dev.stevecreate.agent.adapter.api.DeployerExecutionSession;
+import dev.stevecreate.agent.adapter.api.DeployerExecutionUpdate;
+import dev.stevecreate.agent.adapter.api.BasinMixerExecutionUpdate;
 import dev.stevecreate.agent.adapter.api.CreatePlanExecutionPhase;
 import dev.stevecreate.agent.adapter.api.CreatePlanExecutionSession;
 import dev.stevecreate.agent.adapter.api.CreatePlanExecutionUpdate;
+import dev.stevecreate.agent.adapter.api.CrushingWheelExecutionSession;
+import dev.stevecreate.agent.adapter.api.CrushingWheelExecutionUpdate;
 import dev.stevecreate.agent.adapter.api.ExecutionCancellationResult;
+import dev.stevecreate.agent.adapter.api.FanProcessingExecutionSession;
+import dev.stevecreate.agent.adapter.api.FanProcessingExecutionUpdate;
+import dev.stevecreate.agent.adapter.api.MechanicalSawExecutionSession;
+import dev.stevecreate.agent.adapter.api.MechanicalSawExecutionUpdate;
 import dev.stevecreate.agent.adapter.api.RecoverableExecutionSession;
 import dev.stevecreate.agent.adapter.api.RuntimeFingerprint;
 import dev.stevecreate.agent.core.execution.BoundedStepRunner;
+import dev.stevecreate.agent.core.execution.construction.ConstructionTaskGraph;
+import dev.stevecreate.agent.core.execution.construction.TaskAssignment;
+import dev.stevecreate.agent.core.execution.construction.TaskExecutionResult;
 import dev.stevecreate.agent.core.execution.readiness.ExecutionReadinessFailureCode;
 import dev.stevecreate.agent.core.execution.readiness.ExecutionReadyPlan;
 import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.ResourceId;
+import dev.stevecreate.agent.core.siteprep.PreparedSiteExecutionAuthorization;
 import dev.stevecreate.agent.core.recovery.WorldChangeJournal;
 import dev.stevecreate.agent.core.recovery.RecoveryCheckpoint;
 import dev.stevecreate.agent.core.recovery.SessionRecoveryReconciler.Resumable;
 import dev.stevecreate.agent.core.recovery.SessionRecoveryReconciler;
 import dev.stevecreate.agent.core.recovery.WorldChangeJournal.WorldBlockSnapshot;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -27,6 +44,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -41,6 +59,7 @@ public final class CreateV606GoalDrivenExecution {
     /** Drops process-local ownership when an integrated/dedicated server stops; world recovery is persisted separately. */
     public static void clearServerState() {
         ACTIVE_SESSIONS.clear();
+        CreateV606FuelReservationRegistry.clear();
     }
 
     public static StartResult begin(
@@ -48,6 +67,27 @@ public final class CreateV606GoalDrivenExecution {
             ExecutionReadyPlan ready,
             RuntimeFingerprint runtime,
             BlockPos3i resourceBufferPosition) {
+        return begin(
+                level, ready, runtime, resourceBufferPosition, null);
+    }
+
+    public static StartResult begin(
+            ServerLevel level,
+            ExecutionReadyPlan ready,
+            RuntimeFingerprint runtime,
+            BlockPos3i resourceBufferPosition,
+            CreateV606VerifiedExecutionMetadata executionMetadata) {
+        return beginWithinBoundary(level, ready, runtime, resourceBufferPosition,
+                executionMetadata, null);
+    }
+
+    private static StartResult beginWithinBoundary(
+            ServerLevel level,
+            ExecutionReadyPlan ready,
+            RuntimeFingerprint runtime,
+            BlockPos3i resourceBufferPosition,
+            CreateV606VerifiedExecutionMetadata executionMetadata,
+            PreparedSiteExecutionAuthorization preparedSiteAuthorization) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(ready, "ready");
         Objects.requireNonNull(runtime, "runtime");
@@ -60,9 +100,13 @@ public final class CreateV606GoalDrivenExecution {
             return rejected(ExecutionReadinessFailureCode.SESSION_ALREADY_EXISTS,
                     "The verified root session is already active: " + ready.sessionId());
         }
+        CreateV606FuelReservationRegistry.Access fuelReservation = null;
         try {
             CreateV606ExecutionPlanAdapter.MaterializationResult materialized =
-                    new CreateV606ExecutionPlanAdapter().materialize(ready);
+                    executionMetadata == null
+                            ? new CreateV606ExecutionPlanAdapter().materialize(ready)
+                            : new CreateV606ExecutionPlanAdapter().materialize(
+                                    ready, executionMetadata);
             if (materialized instanceof CreateV606ExecutionPlanAdapter.MaterializationFailure failure) {
                 ACTIVE_SESSIONS.remove(ready.sessionId());
                 return rejected(failure.code(), failure.detail());
@@ -86,19 +130,89 @@ public final class CreateV606GoalDrivenExecution {
                                     + available.getOrDefault(entry.getKey(), 0L));
                 }
             }
+            if (executionMetadata != null
+                    && !executionMetadata.fuelReservations().isEmpty()) {
+                var reservation = CreateV606FuelReservationRegistry.reserve(
+                        level,
+                        buffer,
+                        executionMetadata,
+                        executionTick(level));
+                if (reservation
+                        instanceof CreateV606FuelReservationRegistry.ReserveFailure failure) {
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(
+                            ExecutionReadinessFailureCode.INPUT_RESOURCE_MISSING,
+                            failure.detail());
+                }
+                fuelReservation =
+                        ((CreateV606FuelReservationRegistry.Reserved) reservation)
+                                .access();
+            }
             List<CreateV606ExecutionPlanAdapter.ExecutableNode> nodes =
                     ((CreateV606ExecutionPlanAdapter.MaterializationSuccess) materialized).nodes();
             Rejected targetFailure = validateLiveTargets(level, ready);
             if (targetFailure != null) {
+                if (fuelReservation != null) {
+                    fuelReservation.release(executionTick(level));
+                }
                 ACTIVE_SESSIONS.remove(ready.sessionId());
                 return targetFailure;
             }
-            return new Started(new Session(level, ready, runtime, buffer, nodes));
+            return new Started(new Session(
+                    level, ready, runtime, buffer, nodes, fuelReservation,
+                    preparedSiteAuthorization));
         } catch (RuntimeException exception) {
+            if (fuelReservation != null) {
+                fuelReservation.release(executionTick(level));
+            }
             ACTIVE_SESSIONS.remove(ready.sessionId());
             return rejected(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
                     "Goal-driven session construction failed closed: " + exception.getMessage());
         }
+    }
+
+    /** Starts the unchanged executor only after the integrated prepared-site bridge passes. */
+    public static StartResult begin(
+            ServerLevel level,
+            PreparedSiteExecutionAuthorization authorization,
+            String liveWorldIdentity,
+            RuntimeFingerprint runtime,
+            BlockPos3i resourceBufferPosition) {
+        return begin(
+                level,
+                authorization,
+                liveWorldIdentity,
+                runtime,
+                resourceBufferPosition,
+                null);
+    }
+
+    public static StartResult begin(
+            ServerLevel level,
+            PreparedSiteExecutionAuthorization authorization,
+            String liveWorldIdentity,
+            RuntimeFingerprint runtime,
+            BlockPos3i resourceBufferPosition,
+            CreateV606VerifiedExecutionMetadata executionMetadata) {
+        Objects.requireNonNull(authorization, "authorization");
+        Objects.requireNonNull(liveWorldIdentity, "liveWorldIdentity");
+        ResourceId liveDimension = ResourceId.parse(level.dimension().location().toString());
+        if (!authorization.worldIdentity().equals(liveWorldIdentity)
+                || !authorization.dimension().equals(liveDimension)) {
+            return rejected(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
+                    "Prepared-site authorization identity differs from the live world");
+        }
+        if (!Instant.now().isBefore(authorization.expiresAt())) {
+            return rejected(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
+                    "Prepared-site execution authorization expired before session creation");
+        }
+        return beginWithinBoundary(
+                level,
+                authorization.executionReadyPlan(),
+                runtime,
+                resourceBufferPosition,
+                executionMetadata,
+                authorization);
     }
 
     public static StartResult resume(
@@ -107,6 +221,22 @@ public final class CreateV606GoalDrivenExecution {
             RuntimeFingerprint runtime,
             BlockPos3i resourceBufferPosition,
             Resumable resumable) {
+        return resume(
+                level,
+                ready,
+                runtime,
+                resourceBufferPosition,
+                resumable,
+                null);
+    }
+
+    public static StartResult resume(
+            ServerLevel level,
+            ExecutionReadyPlan ready,
+            RuntimeFingerprint runtime,
+            BlockPos3i resourceBufferPosition,
+            Resumable resumable,
+            CreateV606VerifiedExecutionMetadata executionMetadata) {
         Objects.requireNonNull(resumable, "resumable");
         if (!level.getServer().isSameThread()) {
             return rejected(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
@@ -126,20 +256,34 @@ public final class CreateV606GoalDrivenExecution {
             return rejected(ExecutionReadinessFailureCode.SESSION_ALREADY_EXISTS,
                     "The verified root session is already active: " + ready.sessionId());
         }
+        CreateV606FuelReservationRegistry.Access fuelReservation = null;
         try {
             Resumable rebased = resumable.rebaseRecoveryTiming(executionTick(level));
-            var materialized = new CreateV606ExecutionPlanAdapter().materialize(ready);
+            var materialized = executionMetadata == null
+                    ? new CreateV606ExecutionPlanAdapter().materialize(ready)
+                    : new CreateV606ExecutionPlanAdapter().materialize(
+                            ready, executionMetadata);
             if (!(materialized instanceof CreateV606ExecutionPlanAdapter.MaterializationSuccess success)
-                    || success.nodes().size() != 1) {
+                    || success.nodes().isEmpty()) {
                 ACTIVE_SESSIONS.remove(ready.sessionId());
                 return rejected(ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
-                        "Initial goal recovery supports one exactly reconciled process node");
+                        "Initial goal recovery requires at least one exactly reconciled process node");
             }
             Create606WorldResourceBuffer buffer = new Create606WorldResourceBuffer(
                     level, resourceBufferPosition);
             Object child;
             var node = success.nodes().get(0);
-            if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
+            if (node instanceof CreateV606ExecutionPlanAdapter.CrusherNode crusher) {
+                AdapterResult<CrushingWheelExecutionSession> result =
+                        Create606CrushingWheelExecutor.resumeGoalDriven(
+                                level, crusher.plan(), runtime, rebased, buffer);
+                if (result instanceof AdapterResult.Failure<CrushingWheelExecutionSession> failure) {
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<CrushingWheelExecutionSession>) result).value();
+            } else if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
                 AdapterResult<CreatePlanExecutionSession> result =
                         Create606WaterWheelMillstoneExecutor.resumeGoalDriven(
                                 level, millstone.plan(), runtime, rebased, buffer);
@@ -149,6 +293,92 @@ public final class CreateV606GoalDrivenExecution {
                             failure.detail());
                 }
                 child = ((AdapterResult.Success<CreatePlanExecutionSession>) result).value();
+            } else if (node instanceof CreateV606ExecutionPlanAdapter.SawNode saw) {
+                AdapterResult<MechanicalSawExecutionSession> result =
+                        Create606MechanicalSawExecutor.resumeGoalDriven(
+                                level, saw.plan(), runtime, rebased, buffer);
+                if (result instanceof AdapterResult.Failure<MechanicalSawExecutionSession> failure) {
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<MechanicalSawExecutionSession>) result).value();
+            } else if (node instanceof CreateV606ExecutionPlanAdapter.FanNode fan) {
+                AdapterResult<FanProcessingExecutionSession> result =
+                        Create606FanProcessingExecutor.resumeGoalDriven(
+                                level, fan.plan(), runtime, rebased, buffer);
+                if (result instanceof AdapterResult.Failure<FanProcessingExecutionSession> failure) {
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(
+                            ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<FanProcessingExecutionSession>) result).value();
+            } else if (node
+                    instanceof CreateV606ExecutionPlanAdapter.BasinPressNode basinPress) {
+                AdapterResult<BasinPressExecutionSession> result =
+                        Create606BasinPressExecutor.resumeGoalDriven(
+                                level, basinPress.plan(), runtime, rebased, buffer);
+                if (result
+                        instanceof AdapterResult.Failure<BasinPressExecutionSession> failure) {
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(
+                            ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<BasinPressExecutionSession>) result).value();
+            } else if (node
+                    instanceof CreateV606ExecutionPlanAdapter.BasinMixerNode basinMixer) {
+                if (executionMetadata != null
+                        && !executionMetadata.fuelReservations().isEmpty()) {
+                    var reservation = CreateV606FuelReservationRegistry.reserve(
+                            level,
+                            buffer,
+                            executionMetadata,
+                            executionTick(level));
+                    if (reservation
+                            instanceof CreateV606FuelReservationRegistry.ReserveFailure failure) {
+                        ACTIVE_SESSIONS.remove(ready.sessionId());
+                        return rejected(
+                                ExecutionReadinessFailureCode.INPUT_RESOURCE_MISSING,
+                                failure.detail());
+                    }
+                    fuelReservation =
+                            ((CreateV606FuelReservationRegistry.Reserved) reservation)
+                                    .access();
+                }
+                AdapterResult<BasinMixerExecutionSession> result =
+                        Create606BasinMixerExecutor.resumeGoalDriven(
+                                level,
+                                basinMixer.plan(),
+                                runtime,
+                                rebased,
+                                buffer,
+                                fuelReservation);
+                if (result
+                        instanceof AdapterResult.Failure<BasinMixerExecutionSession> failure) {
+                    if (fuelReservation != null) {
+                        fuelReservation.release(executionTick(level));
+                    }
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(
+                            ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<BasinMixerExecutionSession>) result).value();
+            } else if (node
+                    instanceof CreateV606ExecutionPlanAdapter.DeployerNode deployer) {
+                AdapterResult<DeployerExecutionSession> result =
+                        Create606DeployerExecutor.resumeGoalDriven(
+                                level, deployer.plan(), runtime, rebased, buffer);
+                if (result
+                        instanceof AdapterResult.Failure<DeployerExecutionSession> failure) {
+                    ACTIVE_SESSIONS.remove(ready.sessionId());
+                    return rejected(
+                            ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<DeployerExecutionSession>) result).value();
             } else {
                 var press = (CreateV606ExecutionPlanAdapter.PressNode) node;
                 AdapterResult<BeltPressExecutionSession> result =
@@ -161,12 +391,22 @@ public final class CreateV606GoalDrivenExecution {
                 }
                 child = ((AdapterResult.Success<BeltPressExecutionSession>) result).value();
             }
-            Session session = new Session(level, ready, runtime, buffer, success.nodes());
+            Session session = new Session(
+                    level,
+                    ready,
+                    runtime,
+                    buffer,
+                    success.nodes(),
+                    fuelReservation,
+                    null);
             session.child = child;
             session.trace.add("execution:recovered_child=" + rebased.session().sessionId()
                     + ",timeoutRebasedAt=" + rebased.savedTick());
             return new Started(session);
         } catch (RuntimeException exception) {
+            if (fuelReservation != null) {
+                fuelReservation.release(executionTick(level));
+            }
             ACTIVE_SESSIONS.remove(ready.sessionId());
             return rejected(ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
                     "Goal-driven recovery failed closed: " + exception.getMessage());
@@ -177,15 +417,26 @@ public final class CreateV606GoalDrivenExecution {
             ServerLevel level,
             ExecutionReadyPlan ready,
             RecoveryCheckpoint checkpoint) {
+        return reconcileReload(level, ready, checkpoint, null);
+    }
+
+    public static ReconcileResult reconcileReload(
+            ServerLevel level,
+            ExecutionReadyPlan ready,
+            RecoveryCheckpoint checkpoint,
+            CreateV606VerifiedExecutionMetadata executionMetadata) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(ready, "ready");
         Objects.requireNonNull(checkpoint, "checkpoint");
         try {
-            var materialized = new CreateV606ExecutionPlanAdapter().materialize(ready);
+            var materialized = executionMetadata == null
+                    ? new CreateV606ExecutionPlanAdapter().materialize(ready)
+                    : new CreateV606ExecutionPlanAdapter().materialize(
+                            ready, executionMetadata);
             if (!(materialized instanceof CreateV606ExecutionPlanAdapter.MaterializationSuccess success)
-                    || success.nodes().size() != 1) {
+                    || success.nodes().isEmpty()) {
                 return new ReconcileRefused(ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
-                        "Initial goal recovery requires one trusted process node");
+                        "Initial goal recovery requires at least one trusted process node");
             }
             var genericPlan = success.nodes().get(0).genericPlan();
             SessionRecoveryReconciler.Discovery discovery = SessionRecoveryReconciler.discover(
@@ -230,6 +481,17 @@ public final class CreateV606GoalDrivenExecution {
             RuntimeFingerprint runtime,
             BlockPos3i resourceBufferPosition,
             List<WorldChangeJournal> journals) {
+        return recoverVerify(
+                level, ready, runtime, resourceBufferPosition, journals, null);
+    }
+
+    public static VerifyRecoveryResult recoverVerify(
+            ServerLevel level,
+            ExecutionReadyPlan ready,
+            RuntimeFingerprint runtime,
+            BlockPos3i resourceBufferPosition,
+            List<WorldChangeJournal> journals,
+            CreateV606VerifiedExecutionMetadata executionMetadata) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(ready, "ready");
         Objects.requireNonNull(runtime, "runtime");
@@ -246,7 +508,10 @@ public final class CreateV606GoalDrivenExecution {
             return new VerifyRecoveryRefused(failure.code(), failure.detail());
         }
         try {
-            var materialized = new CreateV606ExecutionPlanAdapter().materialize(ready);
+            var materialized = executionMetadata == null
+                    ? new CreateV606ExecutionPlanAdapter().materialize(ready)
+                    : new CreateV606ExecutionPlanAdapter().materialize(
+                            ready, executionMetadata);
             if (!(materialized instanceof CreateV606ExecutionPlanAdapter.MaterializationSuccess success)
                     || success.nodes().size() != 1) {
                 return new VerifyRecoveryRefused(ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
@@ -266,11 +531,7 @@ public final class CreateV606GoalDrivenExecution {
             boolean alreadyCollected = before.getOrDefault(goal.target(), 0L) >= goal.quantity();
             if (!alreadyCollected) {
                 var node = success.nodes().get(0);
-                AdapterResult<Integer> collected = node
-                        instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone
-                        ? buffer.collectMillstoneOutput(millstone.plan())
-                        : buffer.collectPressOutput(
-                                ((CreateV606ExecutionPlanAdapter.PressNode) node).plan());
+                AdapterResult<Integer> collected = collectNodeOutput(buffer, node);
                 if (collected instanceof AdapterResult.Failure<Integer> failure) {
                     return new VerifyRecoveryRefused(
                             ExecutionReadinessFailureCode.OUTPUT_NOT_PRODUCED, failure.detail());
@@ -445,8 +706,11 @@ public final class CreateV606GoalDrivenExecution {
         private final ExecutionReadyPlan ready;
         private final RuntimeFingerprint runtime;
         private final Create606WorldResourceBuffer buffer;
+        private final CreateV606FuelReservationRegistry.Access fuelReservation;
+        private final PreparedSiteExecutionAuthorization preparedSiteAuthorization;
         private final List<CreateV606ExecutionPlanAdapter.ExecutableNode> nodes;
         private final Create606PhysicalItemRouteBuilder routeBuilder;
+        private final CreateV606DirectWorldExecutor directExecutor;
         private final List<WorldChangeJournal> journals = new ArrayList<>();
         private final List<String> trace;
         private int nodeIndex;
@@ -455,17 +719,23 @@ public final class CreateV606GoalDrivenExecution {
         private boolean routeJournalRecorded;
         private boolean terminal;
         private TickResult terminalResult;
+        private TickResult lastDirectTickResult;
+        private Cancellation lastDirectCancellation;
 
         private Session(
                 ServerLevel level,
                 ExecutionReadyPlan ready,
                 RuntimeFingerprint runtime,
                 Create606WorldResourceBuffer buffer,
-                List<CreateV606ExecutionPlanAdapter.ExecutableNode> nodes) {
+                List<CreateV606ExecutionPlanAdapter.ExecutableNode> nodes,
+                CreateV606FuelReservationRegistry.Access fuelReservation,
+                PreparedSiteExecutionAuthorization preparedSiteAuthorization) {
             this.level = level;
             this.ready = ready;
             this.runtime = runtime;
             this.buffer = buffer;
+            this.fuelReservation = fuelReservation;
+            this.preparedSiteAuthorization = preparedSiteAuthorization;
             this.nodes = List.copyOf(nodes);
             this.routeBuilder = new Create606PhysicalItemRouteBuilder(
                     level, ready.sessionId(), ready.physicalPlan().routes());
@@ -474,9 +744,54 @@ public final class CreateV606GoalDrivenExecution {
             this.trace.add("execution:resource_buffer=" + buffer.position());
             this.trace.add("execution:process_nodes=" + nodes.size());
             this.trace.add("execution:item_route_cells=" + routeBuilder.cellCount());
+            this.trace.add("execution:backend=direct-world-executor-v1");
+            if (fuelReservation != null) {
+                this.trace.add("execution:heated_fuel_reserved=true");
+            }
+            this.directExecutor = new CreateV606DirectWorldExecutor(
+                    ready,
+                    runtime,
+                    nodes,
+                    executionTick(level),
+                    new CreateV606DirectWorldExecutor.BoundedRootBackend() {
+                        @Override
+                        public CreateV606DirectWorldExecutor.BoundedRootUpdate tick() {
+                            return executeDirectTick();
+                        }
+
+                        @Override
+                        public Cancellation cancel(ResourceId reason) {
+                            lastDirectCancellation = cancelLegacy(reason);
+                            return lastDirectCancellation;
+                        }
+
+                        @Override
+                        public TickResult lastTickResult() {
+                            return lastDirectTickResult;
+                        }
+
+                        @Override
+                        public Optional<Cancellation> lastCancellation() {
+                            return Optional.ofNullable(lastDirectCancellation);
+                        }
+                    });
         }
 
         public TickResult tick() {
+            if (terminal) return terminalResult;
+            CreateV606DirectWorldExecutor.Dispatch dispatch =
+                    directExecutor.tick(executionTick(level));
+            if (dispatch.tickResult() != null) {
+                return dispatch.tickResult();
+            }
+            String detail = dispatch.taskResult().failure()
+                    .map(failure -> failure.detail())
+                    .orElse(dispatch.taskResult().detail());
+            return fail(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
+                    "DirectWorldExecutor refused the bounded root tick: " + detail);
+        }
+
+        private TickResult tickLegacy() {
             if (terminal) return terminalResult;
             if (!level.getServer().isSameThread()) {
                 return fail(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
@@ -499,6 +814,21 @@ public final class CreateV606GoalDrivenExecution {
                 Rejected failure = startChild();
                 if (failure != null) return fail(failure.code(), failure.detail());
             }
+            if (child instanceof CrushingWheelExecutionSession crusher) {
+                AdapterResult<CrushingWheelExecutionUpdate> result = crusher.tick();
+                if (result instanceof AdapterResult.Failure<CrushingWheelExecutionUpdate> failure) {
+                    return fail(map(failure.code(), failure.detail()), failure.detail());
+                }
+                CrushingWheelExecutionUpdate update =
+                        ((AdapterResult.Success<CrushingWheelExecutionUpdate>) result).value();
+                if (update instanceof CrushingWheelExecutionUpdate.Completed) {
+                    journals.add(crusher.worldChangeJournal());
+                    outputCollectionPending = true;
+                    return progress(Phase.VERIFY, 1);
+                }
+                return progress(phase(
+                        ((CrushingWheelExecutionUpdate.InProgress) update).phase()), 1);
+            }
             if (child instanceof CreatePlanExecutionSession millstone) {
                 AdapterResult<CreatePlanExecutionUpdate> result = millstone.tick();
                 if (result instanceof AdapterResult.Failure<CreatePlanExecutionUpdate> failure) {
@@ -512,6 +842,96 @@ public final class CreateV606GoalDrivenExecution {
                     return progress(Phase.VERIFY, 1);
                 }
                 return progress(phase(((CreatePlanExecutionUpdate.InProgress) update).phase()), 1);
+            }
+            if (child instanceof MechanicalSawExecutionSession saw) {
+                AdapterResult<MechanicalSawExecutionUpdate> result = saw.tick();
+                if (result instanceof AdapterResult.Failure<MechanicalSawExecutionUpdate> failure) {
+                    return fail(map(failure.code(), failure.detail()), failure.detail());
+                }
+                MechanicalSawExecutionUpdate update =
+                        ((AdapterResult.Success<MechanicalSawExecutionUpdate>) result).value();
+                if (update instanceof MechanicalSawExecutionUpdate.Completed) {
+                    journals.add(saw.worldChangeJournal());
+                    outputCollectionPending = true;
+                    return progress(Phase.VERIFY, 1);
+                }
+                return progress(phase(
+                        ((MechanicalSawExecutionUpdate.InProgress) update).phase()), 1);
+            }
+            if (child instanceof FanProcessingExecutionSession fan) {
+                AdapterResult<FanProcessingExecutionUpdate> result = fan.tick();
+                if (result instanceof AdapterResult.Failure<FanProcessingExecutionUpdate> failure) {
+                    return fail(map(failure.code(), failure.detail()), failure.detail());
+                }
+                FanProcessingExecutionUpdate update =
+                        ((AdapterResult.Success<FanProcessingExecutionUpdate>) result).value();
+                if (update instanceof FanProcessingExecutionUpdate.Completed) {
+                    journals.add(fan.worldChangeJournal());
+                    outputCollectionPending = true;
+                    return progress(Phase.VERIFY, 1);
+                }
+                return progress(phase(
+                        ((FanProcessingExecutionUpdate.InProgress) update).phase()), 1);
+            }
+            if (child instanceof BasinPressExecutionSession basinPress) {
+                AdapterResult<BasinPressExecutionUpdate> result =
+                        basinPress.tick();
+                if (result
+                        instanceof AdapterResult.Failure<BasinPressExecutionUpdate> failure) {
+                    return fail(
+                            map(failure.code(), failure.detail()),
+                            failure.detail());
+                }
+                BasinPressExecutionUpdate update =
+                        ((AdapterResult.Success<BasinPressExecutionUpdate>) result)
+                                .value();
+                if (update instanceof BasinPressExecutionUpdate.Completed) {
+                    journals.add(basinPress.worldChangeJournal());
+                    outputCollectionPending = true;
+                    return progress(Phase.VERIFY, 1);
+                }
+                return progress(phase(
+                        ((BasinPressExecutionUpdate.InProgress) update).phase()), 1);
+            }
+            if (child instanceof BasinMixerExecutionSession basinMixer) {
+                AdapterResult<BasinMixerExecutionUpdate> result =
+                        basinMixer.tick();
+                if (result
+                        instanceof AdapterResult.Failure<BasinMixerExecutionUpdate> failure) {
+                    return fail(
+                            map(failure.code(), failure.detail()),
+                            failure.detail());
+                }
+                BasinMixerExecutionUpdate update =
+                        ((AdapterResult.Success<BasinMixerExecutionUpdate>) result)
+                                .value();
+                if (update instanceof BasinMixerExecutionUpdate.Completed) {
+                    journals.add(basinMixer.worldChangeJournal());
+                    outputCollectionPending = true;
+                    return progress(Phase.VERIFY, 1);
+                }
+                return progress(phase(
+                        ((BasinMixerExecutionUpdate.InProgress) update).phase()), 1);
+            }
+            if (child instanceof DeployerExecutionSession deployer) {
+                AdapterResult<DeployerExecutionUpdate> result =
+                        deployer.tick();
+                if (result
+                        instanceof AdapterResult.Failure<DeployerExecutionUpdate> failure) {
+                    return fail(
+                            map(failure.code(), failure.detail()),
+                            failure.detail());
+                }
+                DeployerExecutionUpdate update =
+                        ((AdapterResult.Success<DeployerExecutionUpdate>) result)
+                                .value();
+                if (update instanceof DeployerExecutionUpdate.Completed) {
+                    journals.add(deployer.worldChangeJournal());
+                    outputCollectionPending = true;
+                    return progress(Phase.VERIFY, 1);
+                }
+                return progress(phase(
+                        ((DeployerExecutionUpdate.InProgress) update).phase()), 1);
             }
             BeltPressExecutionSession press = (BeltPressExecutionSession) child;
             AdapterResult<BeltPressExecutionUpdate> result = press.tick();
@@ -531,9 +951,55 @@ public final class CreateV606GoalDrivenExecution {
         public Cancellation cancel(ResourceId reason) {
             Objects.requireNonNull(reason, "reason");
             if (terminal) throw new IllegalStateException("Goal-driven session is terminal");
+            CreateV606DirectWorldExecutor.Dispatch dispatch =
+                    directExecutor.cancel(executionTick(level), reason);
+            return dispatch.cancellation().orElseThrow(() -> new IllegalStateException(
+                    "DirectWorldExecutor refused the typed cancellation: "
+                            + dispatch.taskResult().detail()));
+        }
+
+        private Cancellation cancelLegacy(ResourceId reason) {
+            Objects.requireNonNull(reason, "reason");
+            if (terminal) throw new IllegalStateException("Goal-driven session is terminal");
             if (child instanceof CreatePlanExecutionSession millstone) {
                 AdapterResult<ExecutionCancellationResult> result = millstone.cancel(reason);
                 if (result instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
+                    journals.add(success.value().journal());
+                }
+            } else if (child instanceof CrushingWheelExecutionSession crusher) {
+                AdapterResult<ExecutionCancellationResult> result = crusher.cancel(reason);
+                if (result instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
+                    journals.add(success.value().journal());
+                }
+            } else if (child instanceof MechanicalSawExecutionSession saw) {
+                AdapterResult<ExecutionCancellationResult> result = saw.cancel(reason);
+                if (result instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
+                    journals.add(success.value().journal());
+                }
+            } else if (child instanceof FanProcessingExecutionSession fan) {
+                AdapterResult<ExecutionCancellationResult> result = fan.cancel(reason);
+                if (result instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
+                    journals.add(success.value().journal());
+                }
+            } else if (child instanceof BasinPressExecutionSession basinPress) {
+                AdapterResult<ExecutionCancellationResult> result =
+                        basinPress.cancel(reason);
+                if (result
+                        instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
+                    journals.add(success.value().journal());
+                }
+            } else if (child instanceof BasinMixerExecutionSession basinMixer) {
+                AdapterResult<ExecutionCancellationResult> result =
+                        basinMixer.cancel(reason);
+                if (result
+                        instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
+                    journals.add(success.value().journal());
+                }
+            } else if (child instanceof DeployerExecutionSession deployer) {
+                AdapterResult<ExecutionCancellationResult> result =
+                        deployer.cancel(reason);
+                if (result
+                        instanceof AdapterResult.Success<ExecutionCancellationResult> success) {
                     journals.add(success.value().journal());
                 }
             } else if (child instanceof BeltPressExecutionSession press) {
@@ -547,6 +1013,11 @@ public final class CreateV606GoalDrivenExecution {
                 if (!routeJournalRecorded) journals.add(routeBuilder.journal());
             }
             trace.add("execution:cancelled=" + reason);
+            releaseFuel("cancel");
+            if (fuelReservation != null && fuelReservation.consumedAny()) {
+                trace.add(
+                        "execution:heated_fuel_compensation=refused_after_consumption");
+            }
             terminal = true;
             ACTIVE_SESSIONS.remove(ready.sessionId());
             terminalResult = new Failed(ready.sessionId(),
@@ -560,12 +1031,124 @@ public final class CreateV606GoalDrivenExecution {
         public int processNodeIndex() { return nodeIndex; }
         public List<String> trace() { return List.copyOf(trace); }
         public List<WorldChangeJournal> journals() { return List.copyOf(journals); }
+        public ConstructionTaskGraph directTaskGraph() { return directExecutor.graph(); }
+        public TaskAssignment directAssignment() { return directExecutor.assignment(); }
+        public Optional<TaskExecutionResult> lastDirectTaskResult() {
+            return directExecutor.lastResult();
+        }
+
+        /** Bot bridge admitted by either the isolated test gate or a verified prepared player site. */
+        CreateV606DirectWorldExecutor.BoundedRootUpdate tickForVerifiedBot() {
+            if (!verifiedBotBridgeAllowed()) {
+                throw new IllegalStateException(
+                        "Verified Bot backend bridge lacks an admitted execution boundary");
+            }
+            trace.remove("execution:backend=direct-world-executor-v1");
+            if (!trace.contains("execution:backend=bot-fleet-executor-v1")) {
+                trace.add("execution:backend=bot-fleet-executor-v1");
+            }
+            return executeDirectTick();
+        }
+
+        /** Exact next physical work position for the admitted adjacent-movement Bot gate. */
+        BlockPos3i nextVerifiedBotWorkPosition() {
+            if (!verifiedBotBridgeAllowed()) {
+                throw new IllegalStateException(
+                        "Verified Bot work-position bridge lacks an admitted execution boundary");
+            }
+            if (nodeIndex > 0 && !routeBuilder.complete()) {
+                return routeBuilder.nextCell();
+            }
+            if (nodeIndex >= nodes.size()) {
+                return buffer.position();
+            }
+            CreateV606ExecutionPlanAdapter.ExecutableNode node = nodes.get(nodeIndex);
+            if (child == null) {
+                return firstBuildPosition(node);
+            }
+            int changes = currentChildJournal().entries().size();
+            if (node instanceof CreateV606ExecutionPlanAdapter.CrusherNode crusher) {
+                int index = Math.min(
+                        changes, crusher.plan().placements().size() - 1);
+                return crusher.plan().placements().get(index).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
+                int index = Math.min(changes, millstone.plan().placements().size() - 1);
+                return millstone.plan().placements().get(index).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.SawNode saw) {
+                int index = Math.min(changes, saw.plan().placements().size() - 1);
+                return saw.plan().placements().get(index).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.FanNode fan) {
+                int index = Math.min(
+                        changes, fan.plan().placements().size() - 1);
+                BlockPos3i candidate =
+                        fan.plan().placements().get(index).position();
+                if (fan.plan().botForbiddenPositions().contains(candidate)) {
+                    throw new IllegalStateException(
+                            "C-06 dangerous-medium construction cannot be assigned to a Bot");
+                }
+                return candidate;
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.BasinPressNode basinPress) {
+                int index = Math.min(
+                        changes, basinPress.plan().placements().size() - 1);
+                return basinPress.plan().placements().get(index).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.BasinMixerNode basinMixer) {
+                int index = Math.min(
+                        changes, basinMixer.plan().placements().size() - 1);
+                return basinMixer.plan().placements().get(index).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.DeployerNode deployer) {
+                int index = Math.min(
+                        changes, deployer.plan().placements().size() - 1);
+                return deployer.plan().placements().get(index).position();
+            }
+            CreateV606ExecutionPlanAdapter.PressNode press =
+                    (CreateV606ExecutionPlanAdapter.PressNode) node;
+            List<BlockPos3i> sequence = pressBuildPositions(press.plan());
+            return sequence.get(Math.min(changes, sequence.size() - 1));
+        }
 
         public List<WorldChangeJournal> journalsSnapshot() {
             List<WorldChangeJournal> snapshot = new ArrayList<>(journals);
-            if (child instanceof CreatePlanExecutionSession millstone) {
+            if (child instanceof CrushingWheelExecutionSession crusher) {
+                WorldChangeJournal journal = crusher.worldChangeJournal();
+                if (!journal.entries().isEmpty() && !snapshot.contains(journal)) {
+                    snapshot.add(journal);
+                }
+            } else if (child instanceof CreatePlanExecutionSession millstone) {
                 WorldChangeJournal journal = millstone.worldChangeJournal();
                 if (!journal.entries().isEmpty() && !snapshot.contains(journal)) snapshot.add(journal);
+            } else if (child instanceof MechanicalSawExecutionSession saw) {
+                WorldChangeJournal journal = saw.worldChangeJournal();
+                if (!journal.entries().isEmpty() && !snapshot.contains(journal)) snapshot.add(journal);
+            } else if (child instanceof FanProcessingExecutionSession fan) {
+                WorldChangeJournal journal = fan.worldChangeJournal();
+                if (!journal.entries().isEmpty() && !snapshot.contains(journal)) {
+                    snapshot.add(journal);
+                }
+            } else if (child instanceof BasinPressExecutionSession basinPress) {
+                WorldChangeJournal journal = basinPress.worldChangeJournal();
+                if (!journal.entries().isEmpty()
+                        && !snapshot.contains(journal)) {
+                    snapshot.add(journal);
+                }
+            } else if (child instanceof BasinMixerExecutionSession basinMixer) {
+                WorldChangeJournal journal = basinMixer.worldChangeJournal();
+                if (!journal.entries().isEmpty()
+                        && !snapshot.contains(journal)) {
+                    snapshot.add(journal);
+                }
+            } else if (child instanceof DeployerExecutionSession deployer) {
+                WorldChangeJournal journal =
+                        deployer.worldChangeJournal();
+                if (!journal.entries().isEmpty()
+                        && !snapshot.contains(journal)) {
+                    snapshot.add(journal);
+                }
             } else if (child instanceof BeltPressExecutionSession press) {
                 WorldChangeJournal journal = press.worldChangeJournal();
                 if (!journal.entries().isEmpty() && !snapshot.contains(journal)) snapshot.add(journal);
@@ -596,6 +1179,13 @@ public final class CreateV606GoalDrivenExecution {
             ReloadResult captured = captureReloadCheckpoint();
             if (!(captured instanceof ReloadReady readyCheckpoint)) return captured;
             RecoveryCheckpoint checkpoint = readyCheckpoint.checkpoint();
+            Optional<String> releaseFailure = releaseFuel("reload");
+            if (releaseFailure.isPresent()) {
+                return new ReloadRefused(
+                        ExecutionReadinessFailureCode.RELOAD_RECOVERY_UNSAFE,
+                        releaseFailure.orElseThrow(),
+                        trace);
+            }
             trace.add("execution:reload_checkpoint=" + checkpoint.session().sessionId());
             terminal = true;
             ACTIVE_SESSIONS.remove(ready.sessionId());
@@ -608,7 +1198,15 @@ public final class CreateV606GoalDrivenExecution {
         private Rejected startChild() {
             CreateV606ExecutionPlanAdapter.ExecutableNode node = nodes.get(nodeIndex);
             ResourceId childId = childSessionId(ready.sessionId(), nodeIndex);
-            if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
+            if (node instanceof CreateV606ExecutionPlanAdapter.CrusherNode crusher) {
+                AdapterResult<CrushingWheelExecutionSession> result =
+                        Create606CrushingWheelExecutor.beginGoalDriven(
+                                level, crusher.plan(), runtime, childId, buffer);
+                if (result instanceof AdapterResult.Failure<CrushingWheelExecutionSession> failure) {
+                    return rejected(map(failure.code(), failure.detail()), failure.detail());
+                }
+                child = ((AdapterResult.Success<CrushingWheelExecutionSession>) result).value();
+            } else if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
                 AdapterResult<CreatePlanExecutionSession> result =
                         Create606WaterWheelMillstoneExecutor.beginGoalDriven(
                                 level, millstone.plan(), runtime, childId, buffer);
@@ -616,6 +1214,67 @@ public final class CreateV606GoalDrivenExecution {
                     return rejected(map(failure.code(), failure.detail()), failure.detail());
                 }
                 child = ((AdapterResult.Success<CreatePlanExecutionSession>) result).value();
+            } else if (node instanceof CreateV606ExecutionPlanAdapter.SawNode saw) {
+                AdapterResult<MechanicalSawExecutionSession> result =
+                        Create606MechanicalSawExecutor.beginGoalDriven(
+                                level, saw.plan(), runtime, childId, buffer);
+                if (result instanceof AdapterResult.Failure<MechanicalSawExecutionSession> failure) {
+                    return rejected(map(failure.code(), failure.detail()), failure.detail());
+                }
+                child = ((AdapterResult.Success<MechanicalSawExecutionSession>) result).value();
+            } else if (node instanceof CreateV606ExecutionPlanAdapter.FanNode fan) {
+                AdapterResult<FanProcessingExecutionSession> result =
+                        Create606FanProcessingExecutor.beginGoalDriven(
+                                level, fan.plan(), runtime, childId, buffer);
+                if (result instanceof AdapterResult.Failure<FanProcessingExecutionSession> failure) {
+                    return rejected(
+                            map(failure.code(), failure.detail()), failure.detail());
+                }
+                child = ((AdapterResult.Success<FanProcessingExecutionSession>) result).value();
+            } else if (node
+                    instanceof CreateV606ExecutionPlanAdapter.BasinPressNode basinPress) {
+                AdapterResult<BasinPressExecutionSession> result =
+                        Create606BasinPressExecutor.beginGoalDriven(
+                                level, basinPress.plan(), runtime, childId, buffer);
+                if (result
+                        instanceof AdapterResult.Failure<BasinPressExecutionSession> failure) {
+                    return rejected(
+                            map(failure.code(), failure.detail()),
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<BasinPressExecutionSession>) result)
+                        .value();
+            } else if (node
+                    instanceof CreateV606ExecutionPlanAdapter.BasinMixerNode basinMixer) {
+                AdapterResult<BasinMixerExecutionSession> result =
+                        Create606BasinMixerExecutor.beginGoalDriven(
+                                level, basinMixer.plan(), runtime,
+                                childId, buffer, fuelReservation);
+                if (result
+                        instanceof AdapterResult.Failure<BasinMixerExecutionSession> failure) {
+                    return rejected(
+                            map(failure.code(), failure.detail()),
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<BasinMixerExecutionSession>) result)
+                        .value();
+            } else if (node
+                    instanceof CreateV606ExecutionPlanAdapter.DeployerNode deployer) {
+                AdapterResult<DeployerExecutionSession> result =
+                        Create606DeployerExecutor.beginGoalDriven(
+                                level,
+                                deployer.plan(),
+                                runtime,
+                                childId,
+                                buffer);
+                if (result
+                        instanceof AdapterResult.Failure<DeployerExecutionSession> failure) {
+                    return rejected(
+                            map(failure.code(), failure.detail()),
+                            failure.detail());
+                }
+                child = ((AdapterResult.Success<DeployerExecutionSession>) result)
+                        .value();
             } else {
                 CreateV606ExecutionPlanAdapter.PressNode press =
                         (CreateV606ExecutionPlanAdapter.PressNode) node;
@@ -637,9 +1296,7 @@ public final class CreateV606GoalDrivenExecution {
 
         private TickResult collectOutput() {
             CreateV606ExecutionPlanAdapter.ExecutableNode node = nodes.get(nodeIndex);
-            AdapterResult<Integer> collected = node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone
-                    ? buffer.collectMillstoneOutput(millstone.plan())
-                    : buffer.collectPressOutput(((CreateV606ExecutionPlanAdapter.PressNode) node).plan());
+            AdapterResult<Integer> collected = collectNodeOutput(buffer, node);
             if (collected instanceof AdapterResult.Failure<Integer> failure) {
                 return fail(map(failure.code(), failure.detail()), failure.detail());
             }
@@ -670,6 +1327,7 @@ public final class CreateV606GoalDrivenExecution {
                         "Goal output quantity=" + output + " required=" + goal.quantity());
             }
             trace.add("execution:goal_verified=" + goal.target() + "x" + output);
+            releaseFuel("complete");
             terminal = true;
             ACTIVE_SESSIONS.remove(ready.sessionId());
             terminalResult = new Completed(ready.sessionId(), goal.target(), goal.quantity(),
@@ -692,11 +1350,177 @@ public final class CreateV606GoalDrivenExecution {
 
         private Failed fail(ExecutionReadinessFailureCode code, String detail) {
             trace.add("execution:failure=" + code + ",detail=" + detail);
+            releaseFuel("failure");
             terminal = true;
             ACTIVE_SESSIONS.remove(ready.sessionId());
             terminalResult = new Failed(ready.sessionId(), code, detail, trace);
             return (Failed) terminalResult;
         }
+
+        private Optional<String> releaseFuel(String reason) {
+            if (fuelReservation == null) return Optional.empty();
+            Optional<String> failure = fuelReservation.release(
+                    executionTick(level));
+            trace.add("execution:heated_fuel_release=" + reason
+                    + (failure.isPresent() ? ":failed" : ":pass"));
+            return failure;
+        }
+
+        private CreateV606DirectWorldExecutor.BoundedRootUpdate executeDirectTick() {
+            AdapterResult<Map<ResourceId, Long>> beforeResult = buffer.snapshot();
+            if (beforeResult instanceof AdapterResult.Failure<Map<ResourceId, Long>> failure) {
+                Failed failed = fail(ExecutionReadinessFailureCode.INPUT_RESOURCE_MISSING,
+                        "Direct mutation accounting could not read the resource buffer: "
+                                + failure.detail());
+                lastDirectTickResult = failed;
+                return new CreateV606DirectWorldExecutor.BoundedRootUpdate(failed, 0, 0);
+            }
+            Map<ResourceId, Long> before =
+                    ((AdapterResult.Success<Map<ResourceId, Long>>) beforeResult).value();
+            int beforeJournalEntries = distinctJournalEntryCount();
+            TickResult raw = tickLegacy();
+            int afterJournalEntries = distinctJournalEntryCount();
+            int journalDelta = afterJournalEntries - beforeJournalEntries;
+            if (journalDelta < 0) {
+                Failed failed = fail(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
+                        "Direct bounded tick lost previously recorded journal entries");
+                lastDirectTickResult = failed;
+                return new CreateV606DirectWorldExecutor.BoundedRootUpdate(failed, 0, 0);
+            }
+            AdapterResult<Map<ResourceId, Long>> afterResult = buffer.snapshot();
+            if (afterResult instanceof AdapterResult.Failure<Map<ResourceId, Long>> failure) {
+                Failed failed = fail(ExecutionReadinessFailureCode.INPUT_RESOURCE_MISSING,
+                        "Direct mutation accounting lost resource-buffer readback: "
+                                + failure.detail());
+                lastDirectTickResult = failed;
+                return new CreateV606DirectWorldExecutor.BoundedRootUpdate(
+                        failed, journalDelta == 0 ? 0 : 1, 0);
+            }
+            Map<ResourceId, Long> after =
+                    ((AdapterResult.Success<Map<ResourceId, Long>>) afterResult).value();
+            lastDirectTickResult = raw;
+            return new CreateV606DirectWorldExecutor.BoundedRootUpdate(
+                    raw,
+                    journalDelta == 0 ? 0 : 1,
+                    before.equals(after) ? 0 : 1);
+        }
+
+        private int distinctJournalEntryCount() {
+            Set<ResourceId> changeIds = new LinkedHashSet<>();
+            for (WorldChangeJournal journal : journalsSnapshot()) {
+                for (WorldChangeJournal.Entry entry : journal.entries()) {
+                    changeIds.add(entry.changeId());
+                }
+            }
+            return changeIds.size();
+        }
+
+        private WorldChangeJournal currentChildJournal() {
+            if (child instanceof CrushingWheelExecutionSession crusher) {
+                return crusher.worldChangeJournal();
+            }
+            if (child instanceof CreatePlanExecutionSession millstone) {
+                return millstone.worldChangeJournal();
+            }
+            if (child instanceof MechanicalSawExecutionSession saw) {
+                return saw.worldChangeJournal();
+            }
+            if (child instanceof FanProcessingExecutionSession fan) {
+                return fan.worldChangeJournal();
+            }
+            if (child instanceof BasinPressExecutionSession basinPress) {
+                return basinPress.worldChangeJournal();
+            }
+            if (child instanceof BasinMixerExecutionSession basinMixer) {
+                return basinMixer.worldChangeJournal();
+            }
+            if (child instanceof DeployerExecutionSession deployer) {
+                return deployer.worldChangeJournal();
+            }
+            if (child instanceof BeltPressExecutionSession press) {
+                return press.worldChangeJournal();
+            }
+            return WorldChangeJournal.empty(childSessionId(ready.sessionId(), nodeIndex));
+        }
+
+        private static BlockPos3i firstBuildPosition(
+                CreateV606ExecutionPlanAdapter.ExecutableNode node) {
+            if (node instanceof CreateV606ExecutionPlanAdapter.CrusherNode crusher) {
+                return crusher.plan().placements().get(0).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
+                return millstone.plan().placements().get(0).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.SawNode saw) {
+                return saw.plan().placements().get(0).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.FanNode fan) {
+                return fan.plan().placements().get(0).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.BasinPressNode basinPress) {
+                return basinPress.plan().placements().get(0).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.BasinMixerNode basinMixer) {
+                return basinMixer.plan().placements().get(0).position();
+            }
+            if (node instanceof CreateV606ExecutionPlanAdapter.DeployerNode deployer) {
+                return deployer.plan().placements().get(0).position();
+            }
+            CreateV606ExecutionPlanAdapter.PressNode press =
+                    (CreateV606ExecutionPlanAdapter.PressNode) node;
+            return pressBuildPositions(press.plan()).get(0);
+        }
+
+        private static List<BlockPos3i> pressBuildPositions(
+                dev.stevecreate.agent.core.plan.BeltPressPlan plan) {
+            List<BlockPos3i> positions = new ArrayList<>();
+            for (dev.stevecreate.agent.core.plan.BeltPressBuildStep step : plan.buildSteps()) {
+                if (step instanceof dev.stevecreate.agent.core.plan.BeltPressBuildStep.PlaceBlock place) {
+                    positions.add(place.position());
+                } else {
+                    dev.stevecreate.agent.core.plan.BeltPressBuildStep.ConnectBelt connection =
+                            (dev.stevecreate.agent.core.plan.BeltPressBuildStep.ConnectBelt) step;
+                    positions.add(connection.startPosition());
+                    positions.add(plan.placement(
+                            dev.stevecreate.agent.core.plan.BeltPressRole.BELT_PRESSING).position());
+                    positions.add(connection.endPosition());
+                }
+            }
+            return List.copyOf(positions);
+        }
+
+        private boolean verifiedBotBridgeAllowed() {
+            return preparedSiteAuthorization != null
+                    || Boolean.getBoolean("steve_industrial.test.goalDrivenExecutionGameTest");
+        }
+    }
+
+    private static AdapterResult<Integer> collectNodeOutput(
+            Create606WorldResourceBuffer buffer,
+            CreateV606ExecutionPlanAdapter.ExecutableNode node) {
+        if (node instanceof CreateV606ExecutionPlanAdapter.CrusherNode crusher) {
+            return buffer.collectCrushingOutput(crusher.plan());
+        }
+        if (node instanceof CreateV606ExecutionPlanAdapter.MillstoneNode millstone) {
+            return buffer.collectMillstoneOutput(millstone.plan());
+        }
+        if (node instanceof CreateV606ExecutionPlanAdapter.SawNode saw) {
+            return buffer.collectSawOutput(saw.plan());
+        }
+        if (node instanceof CreateV606ExecutionPlanAdapter.FanNode fan) {
+            return buffer.collectFanOutput(fan.plan());
+        }
+        if (node instanceof CreateV606ExecutionPlanAdapter.BasinPressNode basinPress) {
+            return buffer.collectBasinPressOutput(basinPress.plan());
+        }
+        if (node instanceof CreateV606ExecutionPlanAdapter.BasinMixerNode basinMixer) {
+            return buffer.collectBasinMixerOutput(basinMixer.plan());
+        }
+        if (node instanceof CreateV606ExecutionPlanAdapter.DeployerNode deployer) {
+            return buffer.collectDeployerOutput(deployer.plan());
+        }
+        return buffer.collectPressOutput(
+                ((CreateV606ExecutionPlanAdapter.PressNode) node).plan());
     }
 
     private static long executionTick(ServerLevel level) {

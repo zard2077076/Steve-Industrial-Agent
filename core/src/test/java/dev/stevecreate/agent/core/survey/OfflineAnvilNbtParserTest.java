@@ -18,11 +18,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class OfflineAnvilNbtParserTest {
     @TempDir Path temp;
+
+    @BeforeEach
+    void canonicalizeTemporaryRoot() throws IOException {
+        temp = temp.toRealPath();
+    }
 
     @Test
     void guardedGzipLevelDatExtractsExact1201IdentityAndDimensions() throws Exception {

@@ -1,0 +1,20 @@
+package dev.stevecreate.agent.core.execution.construction;
+
+/** Stable task-local condition taxonomy. */
+public enum TaskConditionKind {
+    DEPENDENCY_COMPLETE,
+    REGION_AUTHORIZED,
+    CHUNK_LOADED,
+    PLACEMENT_RESERVED,
+    MATERIAL_RESERVED,
+    WORK_POSITION_REACHABLE,
+    WORKER_HEALTHY,
+    CURRENT_STATE_MATCHES,
+    SAFE_MACHINE_FACE,
+    COMPONENT_PRESENT,
+    CONNECTION_PRESENT,
+    MATERIAL_DELIVERED,
+    OUTPUT_PRESENT,
+    SESSION_OWNERSHIP_MATCHES,
+    CLEANUP_COMPLETE
+}

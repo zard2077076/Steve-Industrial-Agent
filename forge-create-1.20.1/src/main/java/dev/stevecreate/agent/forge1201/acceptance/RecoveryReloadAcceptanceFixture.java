@@ -70,6 +70,7 @@ public final class RecoveryReloadAcceptanceFixture {
     }
 
     public static void run(MinecraftServer server, String phase, Logger logger) {
+        AcceptanceRuntimeGuard.requireDevelopmentRuntime("RecoveryReloadAcceptanceFixture");
         try {
             if ("write".equals(phase)) {
                 write(server, logger);

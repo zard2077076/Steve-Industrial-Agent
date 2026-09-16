@@ -14,6 +14,20 @@ import dev.stevecreate.agent.adapter.api.RuntimePlanningResult;
 import dev.stevecreate.agent.adapter.api.RuntimeRecipeCatalogSnapshot;
 import dev.stevecreate.agent.adapter.api.RuntimeRecipeCatalogResult;
 import dev.stevecreate.agent.adapter.api.RuntimeVerifiedPlanningResult;
+import dev.stevecreate.agent.adapter.api.create.CapabilityComponentRequirement;
+import dev.stevecreate.agent.adapter.api.create.CapabilityComponentRole;
+import dev.stevecreate.agent.adapter.api.create.CapabilityImplementationBindingMetadata;
+import dev.stevecreate.agent.adapter.api.create.CapabilityObservationFailureCode;
+import dev.stevecreate.agent.adapter.api.create.CapabilityObservationRequest;
+import dev.stevecreate.agent.adapter.api.create.CapabilityObservationResult;
+import dev.stevecreate.agent.adapter.api.create.CapabilityObservationRoles;
+import dev.stevecreate.agent.adapter.api.create.CapabilityRecipeSemantics;
+import dev.stevecreate.agent.adapter.api.create.CapabilityRecipeSupport;
+import dev.stevecreate.agent.adapter.api.create.CapabilityZoneRequirement;
+import dev.stevecreate.agent.adapter.api.create.CreateCapabilityConstructionTaskGraphFactory;
+import dev.stevecreate.agent.adapter.api.create.CreateCapabilityId;
+import dev.stevecreate.agent.adapter.api.create.CreateCapabilityTaskGraphRequest;
+import dev.stevecreate.agent.adapter.api.create.RuntimeCapabilityCensusSnapshot;
 import dev.stevecreate.agent.core.model.ResourceId;
 import dev.stevecreate.agent.core.binding.ImplementationExecutionSupport;
 import dev.stevecreate.agent.core.binding.ImplementationPortRole;
@@ -30,7 +44,13 @@ import dev.stevecreate.agent.core.layout.PhysicalizationService;
 import dev.stevecreate.agent.core.layout.PhysicalizationSuccess;
 import dev.stevecreate.agent.core.layout.PlacementSnapshot;
 import dev.stevecreate.agent.core.layout.VerifiedPhysicalPlan;
+import dev.stevecreate.agent.core.execution.construction.CapabilitySupport;
+import dev.stevecreate.agent.core.execution.construction.ConstructionTaskGraph;
+import dev.stevecreate.agent.core.execution.construction.ExecutionMode;
+import dev.stevecreate.agent.core.execution.construction.TaskKind;
+import dev.stevecreate.agent.core.execution.construction.TaskSourceKind;
 import dev.stevecreate.agent.core.model.BlockPos3i;
+import dev.stevecreate.agent.core.model.Direction6;
 import dev.stevecreate.agent.core.model.QuarterTurn;
 import dev.stevecreate.agent.core.planning.CandidateQuantityConversion;
 import dev.stevecreate.agent.core.planning.MachineCapability;
@@ -43,13 +63,17 @@ import dev.stevecreate.agent.core.resource.GenericResourceType;
 import dev.stevecreate.agent.forge1201.adapter.create.ForgeCreateRuntimeRecipeCatalogs;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateRuntimeMachineCapabilityCatalog;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateRuntimeMachineImplementationCatalog;
+import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateRuntimeCapabilityCensus;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateRuntimeRecipeCatalog;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateV606MachineGeometryCatalog;
+import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateV606RuntimeObservers;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.DeceasedCraftRuntimeKnowledgeExporter;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.ForgeReadOnlyPlacementSnapshots;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -88,7 +112,8 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
                             Collectors.counting()));
             int millingDiscovered = Math.toIntExact(runtimeTypeCounts.getOrDefault("create:milling", 0L));
             int pressingDiscovered = Math.toIntExact(runtimeTypeCounts.getOrDefault("create:pressing", 0L));
-            check(millingDiscovered > 1 && pressingDiscovered > 1,
+            int crushingDiscovered = Math.toIntExact(runtimeTypeCounts.getOrDefault("create:crushing", 0L));
+            check(millingDiscovered > 1 && pressingDiscovered > 1 && crushingDiscovered > 1,
                     "RecipeManager did not expose the expected runtime recipe-type populations");
 
             BlockPos probe = level.getSharedSpawnPos();
@@ -100,12 +125,19 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
                     new CreateRuntimeMachineCapabilityCatalog();
             RuntimeMachineCapabilityCatalogSnapshot capabilities =
                     requireSuccess(capabilityCatalog.snapshot(initial));
-            check(capabilities.declarations().size() == 2,
-                    "Create runtime capability catalog must contain exactly milling and pressing");
+            check(capabilities.declarations().size() == 3,
+                    "Create runtime capability catalog must contain crushing, milling and pressing");
+            RuntimeMachineCapabilityDeclaration crushingCapability =
+                    requireCapability(capabilities, "create:crushing");
             RuntimeMachineCapabilityDeclaration millingCapability =
                     requireCapability(capabilities, "create:milling");
             RuntimeMachineCapabilityDeclaration pressingCapability =
                     requireCapability(capabilities, "create:pressing");
+            checkCapability(
+                    crushingCapability,
+                    "create:crushing",
+                    "create:crushing/gravel",
+                    initial.runtimeFingerprint());
             checkCapability(
                     millingCapability,
                     "create:milling",
@@ -120,8 +152,14 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
                     new CreateRuntimeMachineImplementationCatalog();
             RuntimeMachineImplementationCatalogSnapshot implementations = requireSuccess(
                     implementationCatalog.snapshot(initial, capabilities, false));
-            check(implementations.catalog().implementations().size() == 2,
-                    "Create runtime implementation catalog must contain exactly millstone and press");
+            check(implementations.catalog().implementations().size() == 3,
+                    "Create runtime implementation catalog must contain crusher, millstone and press");
+            checkImplementation(
+                    implementations,
+                    "create:mechanical_crushing_wheel_pair",
+                    "create:crushing",
+                    "create:crushing/gravel",
+                    initial.runtimeFingerprint());
             checkImplementation(
                     implementations,
                     "create:mechanical_millstone",
@@ -190,6 +228,26 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
                             && physicalPlans.stream().allMatch(plan -> plan.evidence().size() == 13)
                             && physicalPlans.stream().allMatch(plan -> !plan.unifiedGraph().edges().isEmpty()),
                     "Standard runtime physicalization did not pass its complete three-orientation matrix");
+            ConstructionTaskGraph capabilityTaskGraph = capabilityTaskGraphContract(
+                    level, initial, physicalPlans.get(0));
+            check(capabilityTaskGraph.tasks().values().stream()
+                            .noneMatch(task -> task.allowedModes().contains(ExecutionMode.BOTS))
+                            && capabilityTaskGraph.descriptors().values().stream().allMatch(descriptor ->
+                            descriptor.modeCapability(ExecutionMode.BOTS).support()
+                                    == CapabilitySupport.UNSUPPORTED)
+                            && capabilityTaskGraph.tasks().values().stream().anyMatch(task ->
+                            task.kind() == TaskKind.SAFE_MACHINE_INTERACTION)
+                            && capabilityTaskGraph.tasks().values().stream().anyMatch(task ->
+                            task.kind() == TaskKind.VERIFY_OUTPUT)
+                            && capabilityTaskGraph.topologicalOrder().size()
+                                    == capabilityTaskGraph.tasks().size(),
+                    "Capability task graph violated mode, interaction, output or DAG invariants");
+            logger.info(
+                    "CREATE_CAPABILITY_TASK_GRAPH_CONTRACT PASS tasks={} dependencies={} descriptors={} directConstrained=true botsUnsupported=true hybridConstrained=true verifiedPhysicalPlanBound=true runtimeBound=true worldSnapshotBound=true freeCoordinates=false executorCreated=false",
+                    capabilityTaskGraph.tasks().size(),
+                    capabilityTaskGraph.dependencies().size(),
+                    capabilityTaskGraph.descriptors().size());
+            capabilityObserverContract(level, initial, probe, capabilityTaskGraph, logger);
             VerifiedPhysicalPlan repeatedPhysical = requireSuccess(physicalization.physicalize(
                     gravelBinding, geometries,
                     physicalConstraints(physicalAnchor, physicalSnapshot, QuarterTurn.ZERO,
@@ -509,10 +567,13 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
             int pressingMapped = Math.toIntExact(initial.catalog().recipes().stream()
                     .filter(recipe -> recipe.recipeType().equals(ResourceId.parse("create:pressing")))
                     .count());
-            check(millingMapped > 1 && pressingMapped > 1,
+            int crushingMapped = Math.toIntExact(initial.catalog().recipes().stream()
+                    .filter(recipe -> recipe.recipeType().equals(ResourceId.parse("create:crushing")))
+                    .count());
+            check(millingMapped > 1 && pressingMapped > 1 && crushingMapped > 1,
                     "Runtime mapping looks like a fixed two-recipe catalog");
             check(initial.mappedRecipeCount() + initial.limitations().size()
-                            == millingDiscovered + pressingDiscovered,
+                            == millingDiscovered + pressingDiscovered + crushingDiscovered,
                     "Supported recipe enumeration did not end in exactly one mapped or rejected result");
             check(initial.limitations().stream().allMatch(limitation ->
                             limitation.recipeId().isPresent()
@@ -579,10 +640,11 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
                         DeceasedCraftRuntimeKnowledgeExporter.export(
                                 level, Path.of(System.getProperty("user.dir")).toRealPath());
                 logger.info(
-                        "STANDARD_RUNTIME_KNOWLEDGE_EXPORT PASS total={} milling={} pressing={} mapped={} rejected={} warnings={} fingerprint={} evidence={} worldMutation=false sessionCreated=false",
+                        "STANDARD_RUNTIME_KNOWLEDGE_EXPORT PASS total={} milling={} pressing={} crushing={} mapped={} rejected={} warnings={} fingerprint={} evidence={} worldMutation=false sessionCreated=false",
                         exported.recipeManagerTotal(),
                         exported.millingCount(),
                         exported.pressingCount(),
+                        exported.crushingCount(),
                         exported.mappedCount(),
                         exported.rejectedCount(),
                         exported.warningCount(),
@@ -593,16 +655,18 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
             }
 
             logger.info(
-                    "CREATE_RUNTIME_RECIPE_BOUNDARY PASS minecraft={} forge={} create={} discovered={} supported={} mapped={} rejected={} millingDiscovered={} pressingDiscovered={} millingMapped={} pressingMapped={} warnings={} capabilities=2 millingCapability=true pressingCapability=true implementations=2 millstoneImplementation=true pressImplementation=true implementationFingerprintReloaded=true boundPlans=2 gravelBoundNodes=2 gravelImplementation=create:mechanical_millstone ironSheetBoundNodes=1 ironSheetImplementation=create:mechanical_press bindingIngredientIdentity=true bindingLayoutAuthority=false physicalPlans=6 physicalOrientations=3 physicalVerifierChecks=13 physicalOutputType=VerifiedPhysicalPlan physicalDeterministic=true physicalFailures=3 sequencedAssemblyPhysicalizationRejected=true physicalExecutionAuthority=false bindingCommandSuccess=true bindingCommandTypedFailure=true bindingCommandWrongThreadRejected=true bindingCommandWorldMutation=false physicalRecipeProofs=2 cobblestoneMilling=true ironPressing=true gravelPlanRecipe=create:milling/cobblestone gravelQuantity=3 gravelExecutions=3 gravelSteps=2 gravelRaw=minecraft:andesite gravelCandidates={} ironSheetPlanRecipe=create:pressing/iron_ingot ironSheetQuantity=2 ironSheetExecutions=2 ironSheetCandidates={} deterministicPlans=true verifiedLogicalPlans=true commandSuccess=true commandTypedFailure=true commandValidationRejected=true commandWrongThreadRejected=true commandWorldMutation=false deploymentCommands=10 deploymentOrientations=3 deploymentTargets=2 deploymentPreview=true deploymentRisks=true deploymentBudget=true deploymentReadiness=true deploymentValidationRejected=true deploymentWrongThreadRejected=true deploymentFormalExecutable=false deploymentWorldMutation=false deploymentSessionCreated=false deploymentPlayerItemsConsumed=false deploymentMachineStarted=false deploymentLlmCalled=false deploymentFreeTextCoordinates=false generationBefore=0 generationAfter={} fingerprintChanged=true noWorldMutation=true sessionCreated=false",
+                    "CREATE_RUNTIME_RECIPE_BOUNDARY PASS minecraft={} forge={} create={} discovered={} supported={} mapped={} rejected={} crushingDiscovered={} millingDiscovered={} pressingDiscovered={} crushingMapped={} millingMapped={} pressingMapped={} warnings={} capabilities=3 crushingCapability=true millingCapability=true pressingCapability=true implementations=3 crusherImplementation=true millstoneImplementation=true pressImplementation=true implementationFingerprintReloaded=true boundPlans=2 gravelBoundNodes=2 gravelImplementation=create:mechanical_millstone ironSheetBoundNodes=1 ironSheetImplementation=create:mechanical_press bindingIngredientIdentity=true bindingLayoutAuthority=false physicalPlans=6 physicalOrientations=3 physicalVerifierChecks=13 physicalOutputType=VerifiedPhysicalPlan physicalDeterministic=true physicalFailures=3 sequencedAssemblyPhysicalizationRejected=true physicalExecutionAuthority=false bindingCommandSuccess=true bindingCommandTypedFailure=true bindingCommandWrongThreadRejected=true bindingCommandWorldMutation=false physicalRecipeProofs=3 gravelCrushing=true cobblestoneMilling=true ironPressing=true gravelPlanRecipe=create:milling/cobblestone gravelQuantity=3 gravelExecutions=3 gravelSteps=2 gravelRaw=minecraft:andesite gravelCandidates={} ironSheetPlanRecipe=create:pressing/iron_ingot ironSheetQuantity=2 ironSheetExecutions=2 ironSheetCandidates={} deterministicPlans=true verifiedLogicalPlans=true commandSuccess=true commandTypedFailure=true commandValidationRejected=true commandWrongThreadRejected=true commandWorldMutation=false deploymentCommands=10 deploymentOrientations=3 deploymentTargets=2 deploymentPreview=true deploymentRisks=true deploymentBudget=true deploymentReadiness=true deploymentValidationRejected=true deploymentWrongThreadRejected=true deploymentFormalExecutable=false deploymentWorldMutation=false deploymentSessionCreated=false deploymentPlayerItemsConsumed=false deploymentMachineStarted=false deploymentLlmCalled=false deploymentFreeTextCoordinates=false generationBefore=0 generationAfter={} fingerprintChanged=true noWorldMutation=true sessionCreated=false",
                     catalog.runtime().minecraftVersion(),
                     catalog.runtime().loaderVersion(),
                     catalog.runtime().industrialModVersions().get("create"),
                     discovered,
-                    millingDiscovered + pressingDiscovered,
+                    crushingDiscovered + millingDiscovered + pressingDiscovered,
                     initial.mappedRecipeCount(),
                     initial.limitations().size(),
+                    crushingDiscovered,
                     millingDiscovered,
                     pressingDiscovered,
+                    crushingMapped,
                     millingMapped,
                     pressingMapped,
                     initial.warnings().size(),
@@ -622,6 +686,174 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
             throw new IllegalStateException("Expected runtime recipe catalog success but received " + result);
         }
         return success.snapshot();
+    }
+
+    private static ConstructionTaskGraph capabilityTaskGraphContract(
+            ServerLevel level,
+            RuntimeRecipeCatalogSnapshot runtime,
+            VerifiedPhysicalPlan plan) {
+        RuntimeCapabilityCensusSnapshot census = CreateRuntimeCapabilityCensus.capture(level, runtime);
+        CapabilityRecipeSemantics semantics = census.recipes().stream()
+                .filter(value -> value.capability() == CreateCapabilityId.CRUSHING)
+                .filter(value -> value.support() == CapabilityRecipeSupport.SUPPORTED_PHASE_I)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Standard runtime has no supported C-05 structural task-graph candidate"));
+        var placement = plan.placements().get(0);
+        List<CapabilityComponentRequirement> metadataComponents = new ArrayList<>();
+        Map<ResourceId, ResourceId> placementReservations = new LinkedHashMap<>();
+        Map<ResourceId, ResourceId> materialReservations = new LinkedHashMap<>();
+        int index = 0;
+        for (var component : placement.components().stream()
+                .sorted(java.util.Comparator.comparing(value -> value.roleId().toString())).toList()) {
+            metadataComponents.add(new CapabilityComponentRequirement(
+                    index == 0 ? CapabilityComponentRole.PRIMARY_MACHINE
+                            : CapabilityComponentRole.SECONDARY_MACHINE,
+                    new BlockPos3i(
+                            component.position().x() - placement.anchor().x(),
+                            component.position().y() - placement.anchor().y(),
+                            component.position().z() - placement.anchor().z()),
+                    List.of(component.blockId()),
+                    true,
+                    false,
+                    true));
+            placementReservations.put(
+                    component.roleId(), id("acceptance:placement_" + index));
+            materialReservations.put(
+                    component.roleId(), id("acceptance:material_" + index));
+            index++;
+        }
+        CapabilityImplementationBindingMetadata metadata =
+                new CapabilityImplementationBindingMetadata(
+                        placement.implementationId(),
+                        CreateCapabilityId.CRUSHING,
+                        "1.20.1",
+                        "6.0.6",
+                        EnumSet.of(Direction6.NORTH, Direction6.EAST,
+                                Direction6.SOUTH, Direction6.WEST),
+                        metadataComponents,
+                        List.of(new CapabilityZoneRequirement(
+                                "acceptance_verified_footprint",
+                                new BlockPos3i(0, 0, 0),
+                                new BlockPos3i(0, 0, 0),
+                                false,
+                                true,
+                                true)),
+                        List.of(
+                                "acceptance fixture proves contract mapping, not C-05 physical acceptance",
+                                "executor remains A-owned"),
+                        true,
+                        false,
+                        false);
+        Set<ResourceId> portIds = placement.ports().values().stream()
+                .map(value -> value.logicalPortId()).collect(Collectors.toSet());
+        Map<ResourceId, ResourceId> routeReservations = new LinkedHashMap<>();
+        int routeIndex = 0;
+        for (var route : plan.routes().stream()
+                .filter(value -> portIds.contains(value.sourceLogicalPortId())
+                        || portIds.contains(value.targetLogicalPortId()))
+                .sorted(java.util.Comparator.comparing(value -> value.id().toString())).toList()) {
+            routeReservations.put(route.id(), id("acceptance:route_" + routeIndex++));
+        }
+        return new CreateCapabilityConstructionTaskGraphFactory().create(
+                new CreateCapabilityTaskGraphRequest(
+                        id("acceptance:create_capability_task_graph"),
+                        plan,
+                        placement.logicalNodeId(),
+                        semantics,
+                        metadata,
+                        placementReservations,
+                        materialReservations,
+                        routeReservations,
+                        id("acceptance:process_material"),
+                        id("acceptance:machine_interaction")));
+    }
+
+    private static void capabilityObserverContract(
+            ServerLevel level,
+            RuntimeRecipeCatalogSnapshot runtime,
+            BlockPos probe,
+            ConstructionTaskGraph graph,
+            Logger logger) {
+        RuntimeCapabilityCensusSnapshot census = CreateRuntimeCapabilityCensus.capture(level, runtime);
+        CapabilityRecipeSemantics semantics = census.recipes().stream()
+                .filter(value -> value.capability() == CreateCapabilityId.CRUSHING)
+                .filter(value -> value.support() == CapabilityRecipeSupport.SUPPORTED_PHASE_I)
+                .filter(value -> value.itemInputs().stream().anyMatch(
+                        RecipeIngredient.ExactResource.class::isInstance))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Standard runtime has no exact-input C-05 observer candidate"));
+        RecipeIngredient.ExactResource input = semantics.itemInputs().stream()
+                .filter(RecipeIngredient.ExactResource.class::isInstance)
+                .map(RecipeIngredient.ExactResource.class::cast)
+                .findFirst().orElseThrow();
+        var output = semantics.itemOutputs().outputs().get(0).resource();
+        var interaction = graph.tasks().values().stream()
+                .filter(value -> value.kind() == TaskKind.SAFE_MACHINE_INTERACTION)
+                .findFirst().orElseThrow();
+        CapabilityObservationRequest request = new CapabilityObservationRequest(
+                id("acceptance:observer_session"),
+                graph.graphId(),
+                interaction.taskId(),
+                id("acceptance:observer_assignment"),
+                graph.verifiedPhysicalPlanId(),
+                interaction.source().sourceKind(),
+                interaction.source().physicalElementId(),
+                semantics.capability(),
+                semantics.recipeId(),
+                runtime.runtimeFingerprint(),
+                graph.worldSnapshotFingerprint(),
+                Map.of(CapabilityObservationRoles.PRIMARY_MACHINE,
+                        new BlockPos3i(probe.getX(), probe.getY(), probe.getZ())),
+                Map.of(input.resourceId(), input.amount()),
+                Map.of(input.resourceId(), input.amount()),
+                Map.of(output.resourceId(), output.amount()),
+                level.getGameTime(),
+                semantics.environment().runtimeObservation().maximumObservationTicks());
+        var observer = CreateV606RuntimeObservers.forCapability(semantics.capability());
+        CapabilityObservationResult serverResult = observer.observe(
+                level,
+                runtime.runtimeFingerprint(),
+                graph.worldSnapshotFingerprint(),
+                request,
+                semantics);
+        CapabilityObservationFailureCode serverCode = observationFailureCode(serverResult);
+        check(serverCode == CapabilityObservationFailureCode.COMPONENT_MISSING
+                        || serverCode == CapabilityObservationFailureCode.WRONG_BLOCK_ENTITY,
+                "Read-only observer did not return a typed missing/wrong component failure");
+
+        AtomicReference<CapabilityObservationResult> wrongThreadResult = new AtomicReference<>();
+        Thread wrongThread = new Thread(
+                () -> wrongThreadResult.set(observer.observe(
+                        level,
+                        runtime.runtimeFingerprint(),
+                        graph.worldSnapshotFingerprint(),
+                        request,
+                        semantics)),
+                "steve-industrial-create-capability-observer-wrong-thread-probe");
+        wrongThread.start();
+        try {
+            wrongThread.join(5_000);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Observer wrong-thread probe was interrupted", interrupted);
+        }
+        check(!wrongThread.isAlive(), "Observer wrong-thread probe did not terminate");
+        check(observationFailureCode(wrongThreadResult.get())
+                        == CapabilityObservationFailureCode.WRONG_THREAD,
+                "Read-only observer did not reject the wrong thread");
+        logger.info(
+                "CREATE_CAPABILITY_RUNTIME_OBSERVERS PASS serverTypedFailure={} wrongThreadRejected=true assignmentBound=true verifiedPhysicalPlanBound=true runtimeBound=true worldSnapshotBound=true inputDeltaRequired=true outputDeltaRequired=true fixedSleep=false worldMutation=false",
+                serverCode);
+    }
+
+    private static CapabilityObservationFailureCode observationFailureCode(
+            CapabilityObservationResult result) {
+        if (!(result instanceof CapabilityObservationResult.Failure failure)) {
+            throw new IllegalStateException("Expected typed capability-observer failure but received " + result);
+        }
+        return failure.failure().code();
     }
 
     private static LayoutConstraints physicalConstraints(
@@ -824,6 +1056,10 @@ public final class CreateRuntimeRecipeCatalogAcceptanceFixture {
         ResourceId expected = ResourceId.parse(resourceId);
         return resources.stream().anyMatch(resource ->
                 resource.resourceId().equals(expected) && resource.amount() == amount);
+    }
+
+    private static ResourceId id(String value) {
+        return ResourceId.parse(value);
     }
 
     private static RuntimeKnowledgeFailure requireFailure(

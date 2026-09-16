@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -23,6 +24,11 @@ class FormalWorldSurveyRunnerTest {
     private static final List<String> DIMENSIONS = List.of(
             "minecraft:overworld", "minecraft:the_end", "minecraft:the_nether");
     @TempDir Path temp;
+
+    @BeforeEach
+    void canonicalizeTemporaryRoot() throws IOException {
+        temp = temp.toRealPath();
+    }
 
     @Test
     void guardedRunProducesPendingCandidatesAndEqualFingerprintsWithoutPrivateReads() throws Exception {

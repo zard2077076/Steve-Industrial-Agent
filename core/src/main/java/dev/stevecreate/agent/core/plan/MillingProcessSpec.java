@@ -106,7 +106,11 @@ public record MillingProcessSpec(GenericProcessSpec genericSpec, int powerTimeou
     private static void validateMillingShape(GenericProcessSpec spec) {
         if (spec.inputs().size() != 1
                 || spec.outputs().size() != 1
-                || !spec.optionalByproducts().isEmpty()
+                // Byproducts are allowed. Milling drops one in 32 of the registry's
+                // recipes, and the millstone tolerates a declared byproduct in its output
+                // inventory rather than calling it an unexpected item.
+                || spec.optionalByproducts().stream().anyMatch(value ->
+                        value.resourceType() != GenericResourceType.ITEM)
                 || spec.inputs().get(0).resourceType() != GenericResourceType.ITEM
                 || spec.outputs().get(0).resourceType() != GenericResourceType.ITEM
                 || spec.inputs().get(0).amount() > MAX_ITEM_COUNT

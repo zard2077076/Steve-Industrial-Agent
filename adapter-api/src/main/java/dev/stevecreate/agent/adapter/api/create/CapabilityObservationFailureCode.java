@@ -1,0 +1,23 @@
+package dev.stevecreate.agent.adapter.api.create;
+
+/** Stable fail-closed v606 observer outcomes. */
+public enum CapabilityObservationFailureCode {
+    WRONG_THREAD,
+    RUNTIME_MISMATCH,
+    WORLD_SNAPSHOT_MISMATCH,
+    OBSERVATION_TIMEOUT,
+    CHUNK_NOT_LOADED,
+    COMPONENT_MISSING,
+    WRONG_BLOCK_ENTITY,
+    INSUFFICIENT_POWER,
+    OVERSTRESSED,
+    WRONG_ROTATION,
+    AIRFLOW_OBSTRUCTED,
+    MEDIUM_MISSING,
+    HEAT_MISSING,
+    HELD_ITEM_MISMATCH,
+    RECIPE_MISMATCH,
+    INPUT_NOT_CONSUMED,
+    OUTPUT_NOT_OBSERVED,
+    OBSERVATION_UNAVAILABLE
+}

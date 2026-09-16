@@ -9,10 +9,10 @@ import com.simibubi.create.content.kinetics.belt.BeltPart;
 import com.simibubi.create.content.kinetics.belt.BeltSlope;
 import com.simibubi.create.content.kinetics.belt.item.BeltConnectorItem;
 import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
-import com.simibubi.create.content.kinetics.motor.CreativeMotorBlockEntity;
 import com.simibubi.create.content.kinetics.press.MechanicalPressBlockEntity;
 import com.simibubi.create.content.kinetics.press.PressingBehaviour;
 import com.simibubi.create.content.kinetics.press.PressingRecipe;
+import com.simibubi.create.content.kinetics.waterwheel.WaterWheelBlockEntity;
 import com.simibubi.create.content.logistics.funnel.AbstractFunnelBlock;
 import com.simibubi.create.content.logistics.funnel.FunnelBlock;
 import com.simibubi.create.content.processing.recipe.ProcessingOutput;
@@ -60,6 +60,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
@@ -88,6 +89,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
     private final Create606WorldResourceBuffer resourceBuffer;
 
     private int buildStepIndex;
+    private int pilotFlowPlacementIndex;
     private long feedTick = -1;
     private PressingRecipe pressingRecipe;
     private boolean inputObservedOnBelt;
@@ -100,7 +102,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             BeltPressPlan plan,
             RuntimeFingerprint runtime,
             ResourceId sessionId) {
-        this(level, plan, runtime, sessionId, WorldChangeJournal.empty(sessionId), 0, null);
+        this(level, plan, runtime, sessionId, WorldChangeJournal.empty(sessionId), 0, 0, null);
     }
 
     Create606BeltPressActionHandler(
@@ -109,7 +111,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             RuntimeFingerprint runtime,
             ResourceId sessionId,
             Create606WorldResourceBuffer resourceBuffer) {
-        this(level, plan, runtime, sessionId, WorldChangeJournal.empty(sessionId), 0,
+        this(level, plan, runtime, sessionId, WorldChangeJournal.empty(sessionId), 0, 0,
                 Objects.requireNonNull(resourceBuffer, "resourceBuffer"));
     }
 
@@ -120,7 +122,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             ResourceId sessionId,
             WorldChangeJournal existingJournal,
             int buildStepIndex) {
-        this(level, plan, runtime, sessionId, existingJournal, buildStepIndex, null);
+        this(level, plan, runtime, sessionId, existingJournal, buildStepIndex, 0, null);
     }
 
     Create606BeltPressActionHandler(
@@ -130,6 +132,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             ResourceId sessionId,
             WorldChangeJournal existingJournal,
             int buildStepIndex,
+            int pilotFlowPlacementIndex,
             Create606WorldResourceBuffer resourceBuffer) {
         this.level = Objects.requireNonNull(level, "level");
         this.plan = Objects.requireNonNull(plan, "plan");
@@ -138,6 +141,11 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             throw new IllegalArgumentException("Recovered C-04 build cursor is outside the plan");
         }
         this.buildStepIndex = buildStepIndex;
+        if (pilotFlowPlacementIndex < 0 || pilotFlowPlacementIndex > 2) {
+            throw new IllegalArgumentException(
+                    "Recovered C-04 pilot-flow cursor is outside the two bounded channels");
+        }
+        this.pilotFlowPlacementIndex = pilotFlowPlacementIndex;
         this.resourceBuffer = resourceBuffer;
         this.worldChanges = new Create606WorldChangeJournal(
                 level, sessionId, Objects.requireNonNull(existingJournal, "existingJournal"));
@@ -283,9 +291,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
 
     private ActionHandlerResult buildOne(StepRunnerContext context) {
         if (buildStepIndex >= plan.buildSteps().size()) {
-            return fail(
-                    AdapterFailureCode.PLAN_REJECTED,
-                    "C-04 build handler was invoked after every typed build step completed");
+            return placePilotFlowCell(context);
         }
         BeltPressBuildStep step = plan.buildSteps().get(buildStepIndex);
         FailureDetail failure = step instanceof BeltPressBuildStep.PlaceBlock place
@@ -296,7 +302,7 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
         }
 
         buildStepIndex++;
-        if (buildStepIndex < plan.buildSteps().size()) {
+        if (buildStepIndex < plan.buildSteps().size() || pilotFlowRequired()) {
             return ActionHandlerResult.inProgress(
                     true, worldChanges.drainInvocationReferences());
         }
@@ -316,6 +322,41 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
                 Integer.toString(plan.finalPlacements().size()),
                 INTEGER_VALUE,
                 Integer.toString(plan.finalPlacements().size())));
+    }
+
+    private ActionHandlerResult placePilotFlowCell(StepRunnerContext context) {
+        if (!pilotFlowRequired()) {
+            return fail(AdapterFailureCode.PLAN_REJECTED,
+                    "C-04 build handler was invoked after every typed build step completed");
+        }
+        // The plan owns this rule; the recovery adapter and the acceptance fixture read
+        // the same list, so a topology change moves all three at once.
+        BlockPos target = position(plan.pilotFlowCells().get(pilotFlowPlacementIndex));
+        WorldBlockSnapshot before = worldChanges.capture(target);
+        if (!level.getBlockState(target).canBeReplaced()) {
+            return fail(AdapterFailureCode.PLACEMENT_FAILED,
+                    "C-04 flowing-water target changed at " + target.toShortString());
+        }
+        if (!level.setBlockAndUpdate(target,
+                Fluids.FLOWING_WATER.getFlowing(8, true).createLegacyBlock())) {
+            return fail(AdapterFailureCode.PLACEMENT_FAILED,
+                    "World rejected C-04 bounded flowing water at " + target.toShortString());
+        }
+        worldChanges.recordBlockChange(context, target, before);
+        pilotFlowPlacementIndex++;
+        return pilotFlowRequired()
+                ? ActionHandlerResult.inProgress(true, worldChanges.drainInvocationReferences())
+                : success(evidence(
+                        id("create:c04/observation/placements_verified"),
+                        VerificationEvidenceKind.BLOCK_STATE_MATCH,
+                        BeltPressGenericExecutionPlan.BUILD_EVIDENCE_REQUIREMENT,
+                        context, BeltPressGenericExecutionPlan.GRAPH_ID,
+                        INTEGER_VALUE, Integer.toString(plan.finalPlacements().size()),
+                        INTEGER_VALUE, Integer.toString(plan.finalPlacements().size())));
+    }
+
+    private boolean pilotFlowRequired() {
+        return pilotFlowPlacementIndex < 2;
     }
 
     private FailureDetail placeOne(
@@ -344,6 +385,10 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             return detail(
                     AdapterFailureCode.PLACEMENT_FAILED,
                     "World rejected build step " + place);
+        }
+        if (place.role() == dev.stevecreate.agent.core.plan.BeltPressBuildRole.BELT_WATER_SOURCE
+                || place.role() == dev.stevecreate.agent.core.plan.BeltPressBuildRole.PRESS_WATER_SOURCE) {
+            level.scheduleTick(blockPos, Fluids.WATER, Fluids.WATER.getTickDelay(level));
         }
         worldChanges.recordBlockChange(context, blockPos, before);
         String mismatch = buildStepMismatch(place);
@@ -620,10 +665,6 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
         }
         for (BeltPressPlacement placement : plan.finalPlacements()) {
             BlockEntity blockEntity = level.getBlockEntity(position(placement.position()));
-            if (blockEntity instanceof CreativeMotorBlockEntity motor
-                    && motor.getSpeed() == 0) {
-                motor.initialize();
-            }
             if (blockEntity instanceof SmartBlockEntity smart) smart.tick();
         }
     }
@@ -742,6 +783,13 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
     }
 
     private AdapterResult<Map<BeltPressRole, Double>> capturePositiveKineticSpeeds() {
+        for (BeltPressRole role : List.of(
+                BeltPressRole.BELT_WATER_WHEEL, BeltPressRole.PRESS_WATER_WHEEL)) {
+            BlockEntity blockEntity = level.getBlockEntity(position(plan.placement(role).position()));
+            if (blockEntity instanceof WaterWheelBlockEntity wheel && wheel.flowScore == 0) {
+                wheel.determineAndApplyFlowScore();
+            }
+        }
         String beltFailure = validateInitializedBelt();
         if (beltFailure != null) {
             return adapterFailure(AdapterFailureCode.LIFECYCLE_NOT_READY, beltFailure);
@@ -777,9 +825,18 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
             if (speed == 0) {
                 String lifecycle = kinetic.networkDirty || kinetic.needsSpeedUpdate()
                         ? " while its kinetic state is still settling" : "";
+                String diagnostic = role == BeltPressRole.BELT_WATER_WHEEL
+                        ? waterWheelDiagnostic(
+                                BeltPressRole.BELT_WATER_WHEEL,
+                                BeltPressRole.BELT_WATER_SOURCE)
+                        : role == BeltPressRole.PRESS_WATER_WHEEL
+                                ? waterWheelDiagnostic(
+                                        BeltPressRole.PRESS_WATER_WHEEL,
+                                        BeltPressRole.PRESS_WATER_SOURCE)
+                                : "";
                 return adapterFailure(
                         AdapterFailureCode.LIFECYCLE_NOT_READY,
-                        role + " has not received power" + lifecycle);
+                        role + " has not received power" + lifecycle + diagnostic);
             }
             speeds.put(role, Math.abs((double) speed));
         }
@@ -792,6 +849,29 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
                     "Powered belt is not moving from typed input toward typed output");
         }
         return new AdapterResult.Success<>(Map.copyOf(speeds));
+    }
+
+    private String waterWheelDiagnostic(BeltPressRole wheelRole, BeltPressRole sourceRole) {
+        BlockPos wheelPosition = position(plan.placement(wheelRole).position());
+        BlockPos sourcePosition = position(plan.placement(sourceRole).position());
+        BlockPos flowPosition = sourcePosition.below();
+        BlockEntity entity = level.getBlockEntity(wheelPosition);
+        int flowScore = entity instanceof WaterWheelBlockEntity wheel ? wheel.flowScore : Integer.MIN_VALUE;
+        return " [flowScore=" + flowScore
+                + ", wheelState=" + level.getBlockState(wheelPosition)
+                + ", source=" + level.getFluidState(sourcePosition)
+                + ", flow=" + level.getFluidState(flowPosition)
+                + ", flowVector=" + level.getFluidState(flowPosition).getFlow(level, flowPosition)
+                + ", north=" + fluidDiagnostic(wheelPosition.north())
+                + ", south=" + fluidDiagnostic(wheelPosition.south())
+                + ", up=" + fluidDiagnostic(wheelPosition.above())
+                + ", down=" + fluidDiagnostic(wheelPosition.below())
+                + "]";
+    }
+
+    private String fluidDiagnostic(BlockPos position) {
+        return level.getFluidState(position) + "/"
+                + level.getFluidState(position).getFlow(level, position);
     }
 
     private String validateInitializedBelt() {
@@ -1017,7 +1097,11 @@ final class Create606BeltPressActionHandler implements StepActionHandler {
     private static BlockState applyTypedState(
             BeltPressBuildStep.PlaceBlock place,
             BlockState state) {
-        if (place.rotationAxis() != PlanBlockAxis.NONE
+        if ((place.role() == dev.stevecreate.agent.core.plan.BeltPressBuildRole.BELT_WATER_WHEEL
+                || place.role() == dev.stevecreate.agent.core.plan.BeltPressBuildRole.PRESS_WATER_WHEEL)) {
+            state = state.setValue(BlockStateProperties.FACING,
+                    place.rotationAxis() == PlanBlockAxis.X ? Direction.EAST : Direction.SOUTH);
+        } else if (place.rotationAxis() != PlanBlockAxis.NONE
                 && state.hasProperty(BlockStateProperties.AXIS)) {
             state = state.setValue(
                     BlockStateProperties.AXIS,

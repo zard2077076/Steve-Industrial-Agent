@@ -22,6 +22,7 @@ class FormalWorldReadOnlyGuardTest {
 
     @BeforeEach
     void setUp() throws IOException {
+        temp = temp.toRealPath();
         formalInstance = Files.createDirectories(temp.resolve("formal-instance"));
         world = Files.createDirectories(formalInstance.resolve("saves/world"));
         audit = temp.resolve("repository/work/formal-survey/world");

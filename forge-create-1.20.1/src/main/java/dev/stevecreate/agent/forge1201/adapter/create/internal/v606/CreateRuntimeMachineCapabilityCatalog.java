@@ -11,6 +11,12 @@ import dev.stevecreate.agent.adapter.api.RuntimeMachineCapabilitySource;
 import dev.stevecreate.agent.adapter.api.RuntimeRecipeCatalogSnapshot;
 import dev.stevecreate.agent.core.model.ResourceId;
 import dev.stevecreate.agent.core.plan.BeltPressGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.BasinMixerGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.CrushingWheelGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.DeployerGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.FanProcessingGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.BasinPressGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.MechanicalSawGenericExecutionPlan;
 import dev.stevecreate.agent.core.plan.WaterWheelMillstoneGenericExecutionPlan;
 import dev.stevecreate.agent.core.planning.CapabilityResourceRequirement;
 import dev.stevecreate.agent.core.planning.CapabilityVersionLimits;
@@ -29,6 +35,15 @@ public final class CreateRuntimeMachineCapabilityCatalog
             "steve_industrial:create_runtime_1_20_1_6_0_6");
     public static final ResourceId MILLING_CAPABILITY_ID = id("create:milling");
     public static final ResourceId PRESSING_CAPABILITY_ID = id("create:pressing");
+    public static final ResourceId CRUSHING_CAPABILITY_ID = id("create:crushing");
+    public static final ResourceId CUTTING_CAPABILITY_ID = id("create:cutting");
+    public static final ResourceId FAN_WASHING_CAPABILITY_ID = id("create:splashing");
+    public static final ResourceId FAN_SMOKING_CAPABILITY_ID = id("minecraft:smoking");
+    public static final ResourceId FAN_HAUNTING_CAPABILITY_ID = id("create:haunting");
+    public static final ResourceId FAN_BLASTING_CAPABILITY_ID = id("minecraft:blasting");
+    public static final ResourceId COMPACTING_CAPABILITY_ID = id("create:compacting");
+    public static final ResourceId MIXING_CAPABILITY_ID = id("create:mixing");
+    public static final ResourceId DEPLOYING_CAPABILITY_ID = id("create:deploying");
 
     private static final String MINECRAFT_VERSION = "1.20.1";
     private static final String FORGE_LOADER = "forge";
@@ -36,6 +51,22 @@ public final class CreateRuntimeMachineCapabilityCatalog
     private static final String CREATE_VERSION_PREFIX = "6.0.6";
     private static final ResourceId MILLING_PROVEN_RECIPE = id("create:milling/cobblestone");
     private static final ResourceId PRESSING_PROVEN_RECIPE = id("create:pressing/iron_ingot");
+    private static final ResourceId CRUSHING_PROVEN_RECIPE = id("create:crushing/gravel");
+    private static final ResourceId CUTTING_PROVEN_RECIPE = id("create:cutting/andesite_alloy");
+    private static final ResourceId FAN_WASHING_PROVEN_RECIPE =
+            id("create:splashing/wheat_flour");
+    private static final ResourceId FAN_SMOKING_PROVEN_RECIPE =
+            id("minecraft:cooked_beef_from_smoking");
+    private static final ResourceId FAN_HAUNTING_PROVEN_RECIPE =
+            id("create:haunting/blackstone");
+    private static final ResourceId FAN_BLASTING_PROVEN_RECIPE =
+            id("minecraft:iron_ingot_from_blasting_raw_iron");
+    private static final ResourceId COMPACTING_PROVEN_RECIPE =
+            id("create:compacting/blaze_cake");
+    private static final ResourceId MIXING_PROVEN_RECIPE =
+            id("create:mixing/andesite_alloy");
+    private static final ResourceId DEPLOYING_PROVEN_RECIPE =
+            id("create:deploying/cogwheel");
 
     @Override
     public ResourceId adapterId() {
@@ -108,7 +139,129 @@ public final class CreateRuntimeMachineCapabilityCatalog
                         VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
                 recipeCatalog,
                 fingerprint);
-        List<RuntimeMachineCapabilityDeclaration> declarations = List.of(milling, pressing);
+        RuntimeMachineCapabilityDeclaration crushing = declaration(
+                CRUSHING_CAPABILITY_ID,
+                CrushingWheelGenericExecutionPlan.ACTION_HANDLER_ID,
+                CRUSHING_PROVEN_RECIPE,
+                Set.of(
+                        VerificationEvidenceKind.NETWORK_CONNECTED,
+                        VerificationEvidenceKind.POWER_PRESENT,
+                        VerificationEvidenceKind.INPUT_CONSUMED,
+                        VerificationEvidenceKind.PROCESS_STARTED,
+                        VerificationEvidenceKind.PROCESS_COMPLETED,
+                        VerificationEvidenceKind.OUTPUT_PRODUCED,
+                        VerificationEvidenceKind.OUTPUT_STORED,
+                        VerificationEvidenceKind.NO_NEW_CRASH,
+                        VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration cutting = declaration(
+                CUTTING_CAPABILITY_ID,
+                MechanicalSawGenericExecutionPlan.ACTION_HANDLER_ID,
+                CUTTING_PROVEN_RECIPE,
+                Set.of(
+                        VerificationEvidenceKind.NETWORK_CONNECTED,
+                        VerificationEvidenceKind.POWER_PRESENT,
+                        VerificationEvidenceKind.INPUT_CONSUMED,
+                        VerificationEvidenceKind.PROCESS_STARTED,
+                        VerificationEvidenceKind.PROCESS_COMPLETED,
+                        VerificationEvidenceKind.OUTPUT_PRODUCED,
+                        VerificationEvidenceKind.OUTPUT_STORED,
+                        VerificationEvidenceKind.NO_NEW_CRASH,
+                        VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
+                recipeCatalog,
+                fingerprint);
+        Set<VerificationEvidenceKind> fanEvidence = Set.of(
+                VerificationEvidenceKind.NETWORK_CONNECTED,
+                VerificationEvidenceKind.POWER_PRESENT,
+                VerificationEvidenceKind.INPUT_CONSUMED,
+                VerificationEvidenceKind.PROCESS_STARTED,
+                VerificationEvidenceKind.PROCESS_COMPLETED,
+                VerificationEvidenceKind.OUTPUT_PRODUCED,
+                VerificationEvidenceKind.OUTPUT_STORED,
+                VerificationEvidenceKind.NO_NEW_CRASH,
+                VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE);
+        RuntimeMachineCapabilityDeclaration fanWashing = declaration(
+                FAN_WASHING_CAPABILITY_ID,
+                FanProcessingGenericExecutionPlan.ACTION_HANDLER_ID,
+                FAN_WASHING_PROVEN_RECIPE,
+                fanEvidence,
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration fanSmoking = declaration(
+                FAN_SMOKING_CAPABILITY_ID,
+                FanProcessingGenericExecutionPlan.ACTION_HANDLER_ID,
+                FAN_SMOKING_PROVEN_RECIPE,
+                fanEvidence,
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration fanHaunting = declaration(
+                FAN_HAUNTING_CAPABILITY_ID,
+                FanProcessingGenericExecutionPlan.ACTION_HANDLER_ID,
+                FAN_HAUNTING_PROVEN_RECIPE,
+                fanEvidence,
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration fanBlasting = declaration(
+                FAN_BLASTING_CAPABILITY_ID,
+                FanProcessingGenericExecutionPlan.ACTION_HANDLER_ID,
+                FAN_BLASTING_PROVEN_RECIPE,
+                fanEvidence,
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration compacting = declaration(
+                COMPACTING_CAPABILITY_ID,
+                BasinPressGenericExecutionPlan.ACTION_HANDLER_ID,
+                COMPACTING_PROVEN_RECIPE,
+                Set.of(
+                        VerificationEvidenceKind.NETWORK_CONNECTED,
+                        VerificationEvidenceKind.POWER_PRESENT,
+                        VerificationEvidenceKind.INPUT_CONSUMED,
+                        VerificationEvidenceKind.PROCESS_STARTED,
+                        VerificationEvidenceKind.PROCESS_COMPLETED,
+                        VerificationEvidenceKind.OUTPUT_PRODUCED,
+                        VerificationEvidenceKind.OUTPUT_STORED,
+                        VerificationEvidenceKind.NO_NEW_CRASH,
+                        VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration mixing = declaration(
+                MIXING_CAPABILITY_ID,
+                BasinMixerGenericExecutionPlan.ACTION_HANDLER_ID,
+                MIXING_PROVEN_RECIPE,
+                Set.of(
+                        VerificationEvidenceKind.NETWORK_CONNECTED,
+                        VerificationEvidenceKind.POWER_PRESENT,
+                        VerificationEvidenceKind.INPUT_CONSUMED,
+                        VerificationEvidenceKind.PROCESS_STARTED,
+                        VerificationEvidenceKind.PROCESS_COMPLETED,
+                        VerificationEvidenceKind.OUTPUT_PRODUCED,
+                        VerificationEvidenceKind.OUTPUT_STORED,
+                        VerificationEvidenceKind.NO_NEW_CRASH,
+                        VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
+                recipeCatalog,
+                fingerprint);
+        RuntimeMachineCapabilityDeclaration deploying = declaration(
+                DEPLOYING_CAPABILITY_ID,
+                DeployerGenericExecutionPlan.ACTION_HANDLER_ID,
+                DEPLOYING_PROVEN_RECIPE,
+                Set.of(
+                        VerificationEvidenceKind.NETWORK_CONNECTED,
+                        VerificationEvidenceKind.POWER_PRESENT,
+                        VerificationEvidenceKind.INPUT_CONSUMED,
+                        VerificationEvidenceKind.PROCESS_STARTED,
+                        VerificationEvidenceKind.PROCESS_COMPLETED,
+                        VerificationEvidenceKind.OUTPUT_PRODUCED,
+                        VerificationEvidenceKind.OUTPUT_STORED,
+                        VerificationEvidenceKind.NO_NEW_CRASH,
+                        VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
+                recipeCatalog,
+                fingerprint);
+        List<RuntimeMachineCapabilityDeclaration> declarations =
+                List.of(
+                        crushing, cutting, compacting, mixing, deploying,
+                        fanWashing, fanSmoking, fanHaunting, fanBlasting,
+                        milling, pressing);
         return new RuntimeMachineCapabilityCatalogResult.Success(
                 new RuntimeMachineCapabilityCatalogSnapshot(
                         new ImmutableMachineCapabilityCatalog(declarations.stream()

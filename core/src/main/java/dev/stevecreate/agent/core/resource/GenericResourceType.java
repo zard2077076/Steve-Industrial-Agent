@@ -14,7 +14,8 @@ public enum GenericResourceType {
     ROTATIONAL_POWER("rotational_power"),
     ELECTRICAL_ENERGY("electrical_energy"),
     CHEMICAL("chemical"),
-    HEAT("heat");
+    HEAT("heat"),
+    AIRFLOW("airflow");
 
     private final String serializedName;
 
@@ -35,6 +36,7 @@ public enum GenericResourceType {
             case "electrical_energy" -> ELECTRICAL_ENERGY;
             case "chemical" -> CHEMICAL;
             case "heat" -> HEAT;
+            case "airflow" -> AIRFLOW;
             default -> throw new IllegalArgumentException(
                     "Unknown generic resource type: " + serializedName);
         };

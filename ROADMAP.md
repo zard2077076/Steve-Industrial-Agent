@@ -1,32 +1,14 @@
 # Roadmap
 
-This roadmap is directional, not a promise that a candidate feature is safe or
-scheduled. Each item requires its own typed safety gate and real acceptance.
+This release-facing summary is directional, not a fixed execution sequence.
+In a source checkout, current priorities and evidence live in
+`docs/MASTER_PLAN.md` and `docs/PROJECT_STATE.md`.
 
-## Alpha maintenance
+- Make real player goal/site/material selection and Bot construction reliable and readable.
+- Extend proven Create/IE production, Composite and multi-Bot workflows with exact resource recovery.
+- Improve warehouse replenishment, logistics, diagnosis and bounded maintenance.
+- Add actual cross-mod integrations and larger factory planning in measured slices.
+- Validate release candidates on their real target platforms; deferred checks are not passes.
 
-- harden the completed standalone runtime configuration, world marker and
-  portable backup flow using more launcher/locale/path fixtures;
-- compatibility fixes and clearer player-facing errors;
-- additional privacy/diagnostic redaction tests;
-- repeatable clean-room installation checks;
-- conservative cleanup and recovery hardening.
-- friendlier in-game setup screens while retaining the same fail-closed authority.
-
-## Candidate later versions
-
-- additional verified Create milling and pressing recipes;
-- broader launcher and operating-system validation;
-- guided config migration and backup retention management;
-- more verified Create recipes, each with real block/entity output evidence;
-- independently bounded multiple regions and production lines;
-- an official-version-pinned Mekanism adapter and non-nuclear power support;
-- cross-mod item and power transport after real physical evidence exists;
-- constrained natural-language proposal input that still cannot directly
-  execute free text, arbitrary code or unchecked coordinates.
-
-## Not planned for the current Alpha
-
-Formal important-save automation, nuclear/radiation construction, arbitrary
-factory generation, survival resource theft, automatic updates, telemetry and
-unsolicited network calls are not part of `0.1.0-alpha.1`.
+Formal important-save automation is not enabled by a roadmap item. Nuclear/radiation
+automation and other high-risk game features need their own scoped safety design.

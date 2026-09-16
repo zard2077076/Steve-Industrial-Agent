@@ -120,18 +120,22 @@ public final class BeltPressGenericExecutionPlan {
 
     private static UnifiedMachineGraph graph(BeltPressPlan plan) {
         GraphBuilder builder = new GraphBuilder(plan.origin());
-        MachineNode beltDrive = builder.node(
-                id("steve_industrial:c04/node/belt_drive"),
-                "belt_drive",
-                plan.placement(BeltPressRole.BELT_DRIVE),
+        MachineNode beltWheel = builder.node(
+                id("steve_industrial:c04/node/belt_water_wheel"),
+                "belt_water_wheel",
+                plan.placement(BeltPressRole.BELT_WATER_WHEEL),
                 Set.of(KINETIC_SOURCE),
                 Map.of());
-        MachineNode pressDrive = builder.node(
-                id("steve_industrial:c04/node/press_drive"),
-                "press_drive",
-                plan.placement(BeltPressRole.PRESS_DRIVE),
+        MachineNode beltGearbox = transmission(builder, plan, BeltPressRole.BELT_GEARBOX);
+        MachineNode beltDriveShaft = transmission(builder, plan, BeltPressRole.BELT_DRIVE_SHAFT);
+        MachineNode pressWheel = builder.node(
+                id("steve_industrial:c04/node/press_water_wheel"),
+                "press_water_wheel",
+                plan.placement(BeltPressRole.PRESS_WATER_WHEEL),
                 Set.of(KINETIC_SOURCE),
                 Map.of());
+        MachineNode pressGearbox = transmission(builder, plan, BeltPressRole.PRESS_GEARBOX);
+        MachineNode pressDriveShaft = transmission(builder, plan, BeltPressRole.PRESS_DRIVE_SHAFT);
         MachineNode beltStart = builder.node(
                 BELT_START_NODE_ID,
                 "belt_start",
@@ -174,8 +178,27 @@ public final class BeltPressGenericExecutionPlan {
                 id("steve_industrial:item_source"),
                 upstreamOf(beltStart.relativePosition(), plan));
 
-        MachinePort beltDriveOut = builder.port("belt_drive/power_out", beltDrive, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
-        MachinePort pressDriveOut = builder.port("press_drive/power_out", pressDrive, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
+        for (BeltPressRole role : BeltPressRole.values()) {
+            if (role.isKinetic() || role.isBelt()
+                    || role == BeltPressRole.OUTPUT_CHEST
+                    || role == BeltPressRole.OUTPUT_FUNNEL) continue;
+            String name = role.name().toLowerCase(java.util.Locale.ROOT);
+            builder.node(id("steve_industrial:c04/node/" + name), name,
+                    plan.placement(role), Set.of(id(role.name().endsWith("WATER_SOURCE")
+                            ? "steve_industrial:kinetic_source_fluid"
+                            : "steve_industrial:fluid_containment")), Map.of("owned", "true"));
+        }
+
+        MachinePort beltWheelOut = builder.port("belt_water_wheel/power_out", beltWheel, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
+        MachinePort beltGearboxIn = builder.port("belt_gearbox/power_in", beltGearbox, GenericResourceType.ROTATIONAL_POWER, PortMode.INPUT);
+        MachinePort beltGearboxOut = builder.port("belt_gearbox/power_out", beltGearbox, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
+        MachinePort beltShaftIn = builder.port("belt_drive_shaft/power_in", beltDriveShaft, GenericResourceType.ROTATIONAL_POWER, PortMode.INPUT);
+        MachinePort beltShaftOut = builder.port("belt_drive_shaft/power_out", beltDriveShaft, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
+        MachinePort pressWheelOut = builder.port("press_water_wheel/power_out", pressWheel, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
+        MachinePort pressGearboxIn = builder.port("press_gearbox/power_in", pressGearbox, GenericResourceType.ROTATIONAL_POWER, PortMode.INPUT);
+        MachinePort pressGearboxOut = builder.port("press_gearbox/power_out", pressGearbox, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
+        MachinePort pressShaftIn = builder.port("press_drive_shaft/power_in", pressDriveShaft, GenericResourceType.ROTATIONAL_POWER, PortMode.INPUT);
+        MachinePort pressShaftOut = builder.port("press_drive_shaft/power_out", pressDriveShaft, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
         MachinePort startPowerIn = builder.port("belt_start/power_in", beltStart, GenericResourceType.ROTATIONAL_POWER, PortMode.INPUT);
         MachinePort startPowerOut = builder.port("belt_start/power_out", beltStart, GenericResourceType.ROTATIONAL_POWER, PortMode.OUTPUT);
         MachinePort pressingPowerIn = builder.port("belt_pressing/power_in", beltPressing, GenericResourceType.ROTATIONAL_POWER, PortMode.INPUT);
@@ -196,10 +219,14 @@ public final class BeltPressGenericExecutionPlan {
         MachinePort funnelItemsOut = builder.port("funnel/items_out", funnel, GenericResourceType.ITEM, PortMode.OUTPUT);
         MachinePort chestItemsIn = builder.port("chest/items_in", chest, GenericResourceType.ITEM, PortMode.INPUT);
 
-        builder.edge("power/drive_to_start", beltDriveOut, startPowerIn, GenericResourceType.ROTATIONAL_POWER);
+        builder.edge("power/belt_wheel_to_gearbox", beltWheelOut, beltGearboxIn, GenericResourceType.ROTATIONAL_POWER);
+        builder.edge("power/belt_gearbox_to_shaft", beltGearboxOut, beltShaftIn, GenericResourceType.ROTATIONAL_POWER);
+        builder.edge("power/belt_shaft_to_start", beltShaftOut, startPowerIn, GenericResourceType.ROTATIONAL_POWER);
         builder.edge("power/start_to_pressing", startPowerOut, pressingPowerIn, GenericResourceType.ROTATIONAL_POWER);
         builder.edge("power/pressing_to_end", pressingPowerOut, endPowerIn, GenericResourceType.ROTATIONAL_POWER);
-        builder.edge("power/drive_to_press", pressDriveOut, pressPowerIn, GenericResourceType.ROTATIONAL_POWER);
+        builder.edge("power/press_wheel_to_gearbox", pressWheelOut, pressGearboxIn, GenericResourceType.ROTATIONAL_POWER);
+        builder.edge("power/press_gearbox_to_shaft", pressGearboxOut, pressShaftIn, GenericResourceType.ROTATIONAL_POWER);
+        builder.edge("power/press_shaft_to_press", pressShaftOut, pressPowerIn, GenericResourceType.ROTATIONAL_POWER);
         builder.edge("items/input_to_start", sourceItems, startItemsIn, GenericResourceType.ITEM);
         builder.edge("items/start_to_pressing", startItemsOut, pressingItemsIn, GenericResourceType.ITEM);
         builder.edge("items/pressing_to_press", pressingItemsOut, pressItemsIn, GenericResourceType.ITEM);
@@ -207,6 +234,13 @@ public final class BeltPressGenericExecutionPlan {
         builder.edge("items/end_to_funnel", endItemsOut, funnelItemsIn, GenericResourceType.ITEM);
         builder.edge("items/funnel_to_chest", funnelItemsOut, chestItemsIn, GenericResourceType.ITEM);
         return builder.build();
+    }
+
+    private static MachineNode transmission(
+            GraphBuilder builder, BeltPressPlan plan, BeltPressRole role) {
+        String name = role.name().toLowerCase(java.util.Locale.ROOT);
+        return builder.node(id("steve_industrial:c04/node/" + name), name,
+                plan.placement(role), Set.of(KINETIC_TRANSMISSION), Map.of());
     }
 
     private static List<GenericExecutionStep> steps(BeltPressPlan plan) {
@@ -289,7 +323,7 @@ public final class BeltPressGenericExecutionPlan {
     private static int buildTimeout(BeltPressPlan plan) {
         return Math.min(
                 BoundedExecutionStep.MAX_TIMEOUT_TICKS,
-                Math.addExact(plan.buildSteps().size(), 20));
+                Math.addExact(Math.multiplyExact(plan.buildSteps().size(), 32), 20));
     }
 
     private static int afterBudget(int budget) {

@@ -12,6 +12,7 @@ import dev.stevecreate.agent.adapter.api.RuntimeKnowledgeFailureCode;
 import dev.stevecreate.agent.adapter.api.RuntimeKnowledgePlanningService;
 import dev.stevecreate.agent.adapter.api.RuntimeMachineCapabilityCatalogResult;
 import dev.stevecreate.agent.adapter.api.RuntimeMachineCapabilityCatalogSnapshot;
+import dev.stevecreate.agent.adapter.api.RuntimeMachineCapabilityDeclaration;
 import dev.stevecreate.agent.adapter.api.RuntimeMachineImplementationCatalogResult;
 import dev.stevecreate.agent.adapter.api.RuntimeMachineImplementationCatalogSnapshot;
 import dev.stevecreate.agent.adapter.api.RuntimePlanningResult;
@@ -38,6 +39,7 @@ import dev.stevecreate.agent.core.layout.VerifiedPhysicalPlan;
 import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.QuarterTurn;
 import dev.stevecreate.agent.core.planning.MaterialConstraints;
+import dev.stevecreate.agent.core.planning.ImmutableMachineCapabilityCatalog;
 import dev.stevecreate.agent.core.planning.PlanningStrategyPreference;
 import dev.stevecreate.agent.core.planning.ProductionGoal;
 import dev.stevecreate.agent.core.process.ProcessResource;
@@ -79,6 +81,10 @@ public final class DeceasedCraftRuntimePlanningExporter {
         RuntimeMachineImplementationCatalogSnapshot implementations = requireImplementations(
                 new CreateRuntimeMachineImplementationCatalog().snapshot(
                         recipes, capabilities, false));
+        RuntimeMachineCapabilityCatalogSnapshot millingOnly =
+                onlyCapability(
+                        capabilities,
+                        CreateRuntimeMachineCapabilityCatalog.MILLING_CAPABILITY_ID);
         RuntimeKnowledgePlanningService planning = new RuntimeKnowledgePlanningService();
 
         RuntimeVerifiedPlanningResult gravel = requireSuccess(planning.plan(
@@ -86,7 +92,7 @@ public final class DeceasedCraftRuntimePlanningExporter {
         RuntimeVerifiedPlanningResult ironSheet = requireSuccess(planning.plan(
                 recipes, capabilities, goal("create:iron_sheet", 2)));
         RuntimeVerifiedPlanningResult cokeDust = requireSuccess(planning.plan(
-                recipes, capabilities, goal("immersiveengineering:dust_coke", 4)));
+                recipes, millingOnly, goal("immersiveengineering:dust_coke", 4)));
         RuntimeVerifiedPlanningResult can = requireSuccess(planning.plan(
                 recipes, capabilities, goal("apocalypsenow:can", 3)));
         BindingConstraints bindingConstraints = BindingConstraints.forRuntime(
@@ -135,7 +141,7 @@ public final class DeceasedCraftRuntimePlanningExporter {
                 RuntimeKnowledgeFailureCode.CAPABILITY_CATALOG_MISSING);
 
         RuntimeVerifiedPlanningResult repeatedCokeDust = requireSuccess(planning.plan(
-                recipes, capabilities, goal("immersiveengineering:dust_coke", 4)));
+                recipes, millingOnly, goal("immersiveengineering:dust_coke", 4)));
         VerifiedImplementationBoundPlan repeatedCokeDustBinding = requireBindingSuccess(
                 binding.bind(repeatedCokeDust, implementations, bindingConstraints));
         check(cokeDust.rankedCandidates().equals(repeatedCokeDust.rankedCandidates())
@@ -666,6 +672,25 @@ public final class DeceasedCraftRuntimePlanningExporter {
                         PlanningStrategyPreference.MINIMIZE_STEPS,
                         PlanningStrategyPreference.PREFER_OWNED_RESOURCES),
                 Map.of());
+    }
+
+    private static RuntimeMachineCapabilityCatalogSnapshot onlyCapability(
+            RuntimeMachineCapabilityCatalogSnapshot snapshot,
+            ResourceId capabilityId) {
+        List<RuntimeMachineCapabilityDeclaration> declarations =
+                snapshot.declarations().stream()
+                        .filter(value -> value.capability().capabilityId().equals(capabilityId))
+                        .toList();
+        check(declarations.size() == 1,
+                "Required isolated planning capability is absent: " + capabilityId);
+        return new RuntimeMachineCapabilityCatalogSnapshot(
+                new ImmutableMachineCapabilityCatalog(
+                        declarations.stream()
+                                .map(RuntimeMachineCapabilityDeclaration::capability)
+                                .toList()),
+                declarations,
+                snapshot.runtime(),
+                snapshot.runtimeFingerprint());
     }
 
     private static boolean containsRecipe(

@@ -9,14 +9,15 @@ import org.junit.jupiter.api.Test;
 
 class GenericResourceTypeTest {
     @Test
-    void definesTheSixLoaderNeutralResourceCategories() {
+    void definesTheSevenLoaderNeutralResourceCategories() {
         assertThat(GenericResourceType.values()).containsExactly(
                 GenericResourceType.ITEM,
                 GenericResourceType.FLUID,
                 GenericResourceType.ROTATIONAL_POWER,
                 GenericResourceType.ELECTRICAL_ENERGY,
                 GenericResourceType.CHEMICAL,
-                GenericResourceType.HEAT);
+                GenericResourceType.HEAT,
+                GenericResourceType.AIRFLOW);
     }
 
     @Test
@@ -29,7 +30,8 @@ class GenericResourceTypeTest {
                         "rotational_power",
                         "electrical_energy",
                         "chemical",
-                        "heat")
+                        "heat",
+                        "airflow")
                 .doesNotHaveDuplicates();
 
         for (GenericResourceType type : GenericResourceType.values()) {

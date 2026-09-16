@@ -173,7 +173,7 @@ class PlanTransformTest {
 
             assertThat(rotated.anchor()).isEqualTo(transform.anchor());
             assertThat(rotated.finalPlacements()).hasSize(defaultPlan.finalPlacements().size());
-            assertThat(rotated.preflightPositions()).hasSize(150).doesNotHaveDuplicates();
+            assertThat(rotated.preflightPositions()).hasSize(336).doesNotHaveDuplicates();
             for (BeltPressRole role : BeltPressRole.values()) {
                 BeltPressPlacement before = defaultPlan.placement(role);
                 BeltPressPlacement after = rotated.placement(role);

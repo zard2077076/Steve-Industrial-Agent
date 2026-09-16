@@ -34,7 +34,6 @@ import java.util.Set;
 
 /** Bounded deterministic implementation-bound layout and routing service. */
 public final class PhysicalizationService {
-    private static final int MODULE_SPACING = 16;
     private static final ResourceId BOUNDARY_IMPLEMENTATION = id("layout:external_boundary");
     private static final ResourceId POWER_IMPLEMENTATION = id("layout:bounded_power_source");
     private static final List<int[]> NEIGHBORS = List.of(
@@ -209,6 +208,8 @@ public final class PhysicalizationService {
         List<String> trace = new ArrayList<>();
         trace.add("layout:binding=" + boundPlan.id());
         trace.add("layout:orientation=" + assembly.orientation.name());
+        trace.add("layout:variant=" + constraints.layoutVariant().name());
+        trace.add("layout:module_spacing=" + constraints.moduleSpacing());
         trace.add("layout:placements=" + assembly.placements.size());
         trace.add("layout:item_routes=" + routes.size());
         trace.add("layout:search_operations=" + budget.used());
@@ -234,7 +235,8 @@ public final class PhysicalizationService {
         for (int index = 0; index < nodes.size(); index++) {
             BoundMachineNode node = nodes.get(index);
             MachineGeometryDescriptor geometry = geometries.get(node.logicalNodeId());
-            BlockPos3i moduleOffset = new BlockPos3i(index * MODULE_SPACING, 0, 0).rotateY(orientation);
+            BlockPos3i moduleOffset = new BlockPos3i(
+                    index * constraints.moduleSpacing(), 0, 0).rotateY(orientation);
             BlockPos3i anchor = origin.translate(moduleOffset.x(), moduleOffset.y(), moduleOffset.z());
             List<ResolvedGeometryComponent> components = new ArrayList<>();
             Set<BlockPos3i> previousComponents = Set.copyOf(componentCells);
@@ -306,6 +308,29 @@ public final class PhysicalizationService {
                     node.logicalNodeId(), node.implementationId(), anchor, orientation,
                     components, ports, clearance, powerRoute, geometry.stressImpact(),
                     geometry.topologyContract()));
+        }
+        if (constraints.layoutVariant().reservesExpansionBay()) {
+            BoundMachineNode last = nodes.get(nodes.size() - 1);
+            MachineGeometryDescriptor geometry = geometries.get(last.logicalNodeId());
+            BlockPos3i moduleOffset = new BlockPos3i(
+                    nodes.size() * constraints.moduleSpacing(), 0, 0).rotateY(orientation);
+            BlockPos3i futureAnchor = origin.translate(
+                    moduleOffset.x(), moduleOffset.y(), moduleOffset.z());
+            for (BlockPos3i relative : geometry.clearance().cells()) {
+                budget.operation();
+                BlockPos3i position = resolve(futureAnchor, relative, orientation);
+                Optional<LayoutCellState> state = constraints.snapshot().state(position);
+                if (state.isEmpty() || state.get() == LayoutCellState.UNLOADED) {
+                    marker.stale = true;
+                    return null;
+                }
+                if (state.get() != LayoutCellState.REPLACEABLE
+                        || componentCells.contains(position) || reservedCells.contains(position)) {
+                    marker.clearance = true;
+                    return null;
+                }
+                reservedCells.add(position);
+            }
         }
         return new CandidateAssembly(orientation, placements, componentCells, reservedCells);
     }

@@ -10,6 +10,7 @@ import dev.stevecreate.agent.core.execution.GenericExecutionPlan;
 import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.QuarterTurn;
 import dev.stevecreate.agent.core.plan.BeltPressGenericExecutionPlan;
+import dev.stevecreate.agent.core.plan.BeltPressPlacement;
 import dev.stevecreate.agent.core.plan.BeltPressPlan;
 import dev.stevecreate.agent.core.plan.BeltPressRole;
 import dev.stevecreate.agent.core.recovery.RecoveryCheckpoint;
@@ -26,8 +27,10 @@ import dev.stevecreate.agent.core.recovery.WorldChangeJournal.IrreversibleProces
 import dev.stevecreate.agent.core.recovery.WorldChangeJournal.WorldBlockSnapshot;
 import dev.stevecreate.agent.forge1201.adapter.create.ForgeCreateBeltPressPlanAdapter;
 import dev.stevecreate.agent.forge1201.recovery.ForgeRecoveryWorldScanner;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
@@ -80,6 +83,10 @@ public final class C04RecoveryReloadAcceptanceFixture {
             return;
         }
         try {
+            // Vanilla skips entity and block-entity dispatch after 300 empty-world ticks,
+            // even in loaded spawn chunks. Keep this dev-only fixture awake; normal world
+            // ticking still owns all Create processing (no manual machine ticks).
+            server.overworld().resetEmptyTime();
             int elapsed = server.getTickCount() - fixture.startTick();
             check(elapsed <= TIMEOUT_TICKS,
                     "C-04 recovery fixture exceeded " + TIMEOUT_TICKS + " ticks");
@@ -127,6 +134,7 @@ public final class C04RecoveryReloadAcceptanceFixture {
                 server.getTickCount(),
                 plan,
                 ((AdapterResult.Success<BeltPressExecutionSession>) begin).value(),
+                null,
                 null);
     }
 
@@ -207,22 +215,37 @@ public final class C04RecoveryReloadAcceptanceFixture {
         RescanRequired candidate = (RescanRequired) discovery;
         Map<BlockPos3i, WorldBlockSnapshot> raw = scan(level, candidate.requiredPositions());
         SessionRecoveryReconciler.Reconciliation rawInitial = candidate.reconcile(raw);
+        // A raw reload must look stale, and it must look stale at a kinetic block: those
+        // carry v606 transient state that a restart cannot reproduce, which is the whole
+        // reason the normalized recovery scan exists. This named BELT_START specifically
+        // until the survival-power topology added water wheels, and the wheel is scanned
+        // first — the assertion broke while the property it guards still held.
         check(rawInitial instanceof StaleSession rawStale
                         && rawStale.reason() == StaleSessionReason.WORLD_STATE_CHANGED
-                        && rawStale.position().orElseThrow().equals(
-                                plan.placement(BeltPressRole.BELT_START).position()),
-                "C-04 raw reload did not expose the expected v606 transient belt state: "
+                        && isKineticPosition(plan, rawStale.position().orElseThrow()),
+                "C-04 raw reload did not expose a v606 transient kinetic state: "
                         + rawInitial);
         ForgeCreateBeltPressPlanAdapter recoveryAdapter =
                 new ForgeCreateBeltPressPlanAdapter(level);
         Map<BlockPos3i, WorldBlockSnapshot> exact = recoveryScan(
                 recoveryAdapter, plan, candidate.requiredPositions());
-        long normalizedSnapshots = candidate.requiredPositions().stream()
+        List<BlockPos3i> normalizedPositions = candidate.requiredPositions().stream()
                 .filter(position -> !raw.get(position).equals(exact.get(position)))
-                .count();
-        check(normalizedSnapshots == 6,
-                "C-04 v606 recovery normalization changed an unexpected snapshot count: "
-                        + normalizedSnapshots);
+                .toList();
+        long normalizedSnapshots = normalizedPositions.size();
+        // What matters is not how many snapshots normalization rewrote but where: it may
+        // only touch kinetic blocks. Rewriting a stone or a chest would be normalization
+        // hiding a real world change. The old assertion counted six, which was the
+        // creative-motor topology's number and said nothing about which blocks.
+        check(normalizedSnapshots > 0,
+                "C-04 v606 recovery normalization changed nothing, so the raw/normalized"
+                        + " distinction this gate rests on was not exercised");
+        check(normalizedPositions.stream().allMatch(
+                        position -> isKineticPosition(plan, position)),
+                "C-04 v606 recovery normalization rewrote a non-kinetic snapshot: "
+                        + normalizedPositions.stream()
+                                .filter(position -> !isKineticPosition(plan, position))
+                                .toList());
         SessionRecoveryReconciler.Reconciliation initial = candidate.reconcile(exact);
         check(initial instanceof Resumable,
                 "C-04 unchanged reload was not resumable: " + initial);
@@ -291,6 +314,7 @@ public final class C04RecoveryReloadAcceptanceFixture {
                 server.getTickCount(),
                 plan,
                 session,
+                session.worldChangeJournal(),
                 checkpoint.session().sessionId().toString());
     }
 
@@ -310,10 +334,15 @@ public final class C04RecoveryReloadAcceptanceFixture {
         long inputChanges = journal.entries().stream().filter(InjectedResourceChange.class::isInstance).count();
         long processChanges = journal.entries().stream()
                 .filter(IrreversibleProcessingChange.class::isInstance).count();
-        check(blockChanges == 10, "Recovered C-04 repeated or lost BUILD block changes");
+        check(journal.entries().stream().filter(BlockChange.class::isInstance).toList()
+                        .equals(fixture.recoveredBuildJournal().entries()),
+                "Recovered C-04 repeated, lost or changed its exact BUILD journal");
+        check(journal.modifiedPositions().equals(fixture.recoveredBuildJournal().modifiedPositions()),
+                "Recovered C-04 changed its owned BUILD position set");
         check(inputChanges == 1, "Recovered C-04 did not record exactly one input injection");
         check(processChanges == 1, "Recovered C-04 did not record exactly one real process");
-        check(journal.entries().size() == 12, "Recovered C-04 journal contains unexpected changes");
+        check(journal.entries().size() == fixture.recoveredBuildJournal().entries().size() + 2,
+                "Recovered C-04 journal contains unexpected changes");
         check(evidence.verifiedPlacements().equals(fixture.plan().finalPlacements()),
                 "Recovered C-04 physical placement verification changed");
         check(evidence.recipeId().equals(fixture.plan().process().recipeId())
@@ -324,6 +353,10 @@ public final class C04RecoveryReloadAcceptanceFixture {
                         && evidence.pressCycleObserved()
                         && evidence.outputObservedInChest(),
                 "Recovered C-04 recipe/input/press/output evidence is not one real cycle: " + evidence);
+        fixture.logger().info(
+                "C04_RECOVERY_BUILD_JOURNAL PASS exactEntries={} exactPositions={} unchanged=true readTicks={} naturalWorldTicks=true",
+                blockChanges, journal.modifiedPositions().size(),
+                fixture.server().getTickCount() - fixture.startTick());
         fixture.logger().info(
                 "C04_RECOVERY_RELOAD_PROCESS PASS session={} recipe={} input={} consumed={} output={} observed={} pressCycleTicks={} beltInput=true pressCycle=true chestOutput=true blockChanges={} inputChanges={} processChanges={} repeatedPlacements=0 repeatedInputs=0 duplicatedOutputs=0",
                 fixture.sessionId(),
@@ -346,12 +379,40 @@ public final class C04RecoveryReloadAcceptanceFixture {
     private static void verifyBuildOnlyJournal(
             WorldChangeJournal journal,
             BeltPressPlan plan) {
-        check(journal.entries().size() == 10,
-                "C-04 safe boundary journal must contain ten block changes");
         check(journal.entries().stream().allMatch(BlockChange.class::isInstance),
                 "C-04 safe boundary contains resource history");
-        check(journal.modifiedPositions().size() == plan.finalPlacements().size(),
-                "C-04 safe boundary modified-position count changed");
+        check(new HashSet<>(journal.modifiedPositions()).equals(expectedBuildPositions(plan)),
+                "C-04 safe boundary touched positions the plan does not own");
+    }
+
+    /** Whether a position holds a plan block whose v606 state is transient across a restart. */
+    private static boolean isKineticPosition(BeltPressPlan plan, BlockPos3i position) {
+        return plan.finalPlacements().stream()
+                .anyMatch(placement -> placement.position().equals(position)
+                        && placement.role().isKinetic());
+    }
+
+    /**
+     * Every position the BUILD prefix is allowed to have touched.
+     *
+     * <p>The plan's own placements, plus one pilot flow cell directly below each water
+     * source: the cells {@code Create606BeltPressActionHandler.placePilotFlowCell} writes
+     * and journals without billing them as placements.
+     *
+     * <p>This replaces two counted assertions, {@code entries().size() == 10} and
+     * {@code modifiedPositions().size() == finalPlacements().size()}. Both held the
+     * creative-motor topology's numbers; the survival-power promotion moved the real
+     * values to 30 entries and 28 positions against 26 placements, and neither count
+     * followed. Comparing the position set is strictly stronger than comparing sizes,
+     * and it needs no editing the next time the topology changes. The entry count itself
+     * is deliberately not asserted: a planned position is journalled more than once
+     * during a normal build, which was already true of the old topology (10 = 8 + 2),
+     * so the number describes the build sequence rather than any safety property. What
+     * matters is that nothing outside this set was touched, and that no resource history
+     * appears at a BUILD boundary; both are asserted above.</p>
+     */
+    private static Set<BlockPos3i> expectedBuildPositions(BeltPressPlan plan) {
+        return new HashSet<>(plan.ownedPositions());
     }
 
     private static Map<BlockPos3i, WorldBlockSnapshot> scan(
@@ -427,6 +488,7 @@ public final class C04RecoveryReloadAcceptanceFixture {
             int startTick,
             BeltPressPlan plan,
             BeltPressExecutionSession session,
+            WorldChangeJournal recoveredBuildJournal,
             String sessionId) {
     }
 }

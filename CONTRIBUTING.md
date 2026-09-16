@@ -1,15 +1,12 @@
 # Contributing
 
-Open an issue before changing execution or safety contracts. Never submit saves,
-worlds, private logs, absolute local paths, account data, credentials, tokens or
-third-party mod JARs.
+Discuss changes when shared ownership or scope is unclear; an already-authorized local fix
+does not require opening an Issue or requesting approval again. Never submit saves,
+worlds, logs with private paths, accounts, tokens or third-party mod JARs.
 
-Use Java 17. Keep `core` and `adapter-api` loader-neutral, add typed tests for
-behavior changes, and run:
-
-```powershell
-.\gradlew.bat clean build
-```
-
-Formal or important player worlds must never be test fixtures. Pull requests
-must describe their safety impact, exact test results and compatibility profile.
+Use Java 17 and keep `core` and `adapter-api` loader-neutral. Add meaningful regression
+coverage using the existing framework; test-first is useful, not a required ritual.
+Run relevant Gradle tests/build and isolated physical checks when execution changes.
+Use native shell wrappers on macOS, PowerShell counterparts on Windows. Formal/important worlds are never test
+fixtures. Pull requests must describe safety impact, exact commands/results and
+the compatibility profile used.

@@ -31,6 +31,7 @@ import dev.stevecreate.agent.core.verification.VerificationEvidenceKind;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -503,7 +504,11 @@ final class Create606WaterWheelMillstoneActionHandler implements StepActionHandl
                     AdapterFailureCode.PROCESSING_FAILED,
                     "Millstone input changed to an unexpected stack");
         }
-        OutputObservation output = observeOutputs(millstone, spec.expectedOutputItem());
+        Set<String> declaredByproducts = spec.genericSpec().optionalByproducts().stream()
+                .map(value -> value.resourceId().toString())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        OutputObservation output = observeOutputs(
+                millstone, spec.expectedOutputItem(), declaredByproducts);
         if (output.unexpectedItem() != null) {
             return fail(
                     AdapterFailureCode.PROCESSING_FAILED,
@@ -761,9 +766,22 @@ final class Create606WaterWheelMillstoneActionHandler implements StepActionHandl
         return true;
     }
 
+    /**
+     * What the millstone holds, counting the product and tolerating declared byproducts.
+     *
+     * <p>Anything other than the primary product used to be "unexpected" and failed the
+     * step. Milling drops a byproduct in 32 of the registry's recipes, so those recipes
+     * could not be admitted at all — the refusal was upstream in the catalog, and this is
+     * the check that would have failed had they got this far.
+     *
+     * <p>A byproduct is tolerated, not required: it is a chance drop, and demanding one
+     * would fail a batch for being unlucky. Anything the recipe never mentioned is still
+     * unexpected, which is the case this check exists for.</p>
+     */
     private static OutputObservation observeOutputs(
             MillstoneBlockEntity millstone,
-            ResourceId expectedItem) {
+            ResourceId expectedItem,
+            Set<String> declaredByproducts) {
         int count = 0;
         ResourceId unexpected = null;
         for (int slot = 0; slot < millstone.outputInv.getSlots(); slot++) {
@@ -776,7 +794,7 @@ final class Create606WaterWheelMillstoneActionHandler implements StepActionHandl
                 unexpected = new ResourceId("minecraft", "air");
             } else if (expectedItem.toString().equals(key.toString())) {
                 count += stack.getCount();
-            } else {
+            } else if (!declaredByproducts.contains(key.toString())) {
                 unexpected = new ResourceId(key.getNamespace(), key.getPath());
             }
         }

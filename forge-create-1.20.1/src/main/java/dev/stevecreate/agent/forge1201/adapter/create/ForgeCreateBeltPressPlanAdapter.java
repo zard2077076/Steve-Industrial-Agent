@@ -177,9 +177,12 @@ public final class ForgeCreateBeltPressPlanAdapter implements CreateBeltPressPla
                             + runtime.minecraftVersion() + " forge=" + runtime.loaderVersion()
                             + " create=" + runtimeCreateVersion);
         }
-        List<BlockPos3i> expectedPositions = plan.finalPlacements().stream()
-                .map(placement -> placement.position())
-                .toList();
+        // Every position the plan owns, not only its placements: the pilot flow cells
+        // below each water source are journalled by the build handler, so a checkpoint
+        // taken on a survival-power topology always carries them. Accepting only the
+        // placements refused every such checkpoint, which meant C-04 could not resume
+        // from a restart at all once it stopped running on a creative motor.
+        List<BlockPos3i> expectedPositions = plan.ownedPositions();
         if (positions.size() != expectedPositions.size()
                 || new HashSet<>(positions).size() != positions.size()
                 || !new HashSet<>(positions).equals(new HashSet<>(expectedPositions))) {

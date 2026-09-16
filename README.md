@@ -1,90 +1,104 @@
 # Steve Industrial Agent
 
-> **Experimental Alpha — only use this version in a new, disposable test world.**
-> Do not install it in an important save or a formal long-term world.
+> **Experimental Alpha — only for new, disposable test worlds.**
+> Do not use this build in an important save. This development branch goes beyond
+> the original gravel/iron-sheet pilots; implemented capabilities and the exact
+> evidence scope are recorded in `docs/PROJECT_STATE.md`.
+>
+> **Release status: PRE-RC automated portability passed; visual acceptance pending.**
+> Production Forge config, world-local opt-in and portable offline backup are wired.
+> Do not call the build RC_READY until the independent client is visually accepted.
 
-Steve Industrial Agent is a Minecraft 1.20.1 Forge mod for bounded, typed and
-verifiable industrial automation. Version `0.1.0-alpha.1` is the first playable
-writable-world pilot. It can build and run the two explicitly supported Create
-production paths while enforcing test-world opt-in, verified backup evidence,
-bounded region approval, dry-run/readiness checks, cancellation, cleanup and
-reload recovery.
+Steve Industrial Agent is the new formal name of the project previously called Steve Create Agent. It is an isolated Minecraft 1.20.1 Forge mod and test platform for typed, verifiable AI planning across industrial mods. Create support is the first MVP track; Mekanism is an optional adapter track and must not break Create-only or no-industrial-mod startup.
 
-The mod is a normal Forge mod. Put its JAR in the `mods` directory of a
-compatible instance. PCL2 is the launcher used for the first Windows client
-acceptance; it is not a runtime dependency. Core operation requires no Codex,
-model API or internet connection.
+## Phase IV development status
 
-## Supported environment
+The development branch includes a bilingual Engineer Terminal, live derived-goal
+search, site preview/recommendations, server-authorized clearing, player material
+sources and transactional construction. The empty search uses a small reviewed
+catalog; it is not an execution whitelist for all other products. Create/IE,
+Composite and multiple Bots share verified planning/resource boundaries.
 
-- Windows 11: verified
-- PCL2: primary verified launcher for this release
-- Minecraft: 1.20.1
-- Forge runtime: 47.4.0
-- Create: 6.0.6
-- DeceasedCraft: Beta 5.10.16
-- Prism Launcher and other launchers: not release-blocking and not verified yet
+Selected salvage/material containers, bounded Bot work, persistent project state,
+safe cancellation/return and real completion reports are implemented. C-03,
+Metal Press and Composite/01 have automated Mac client evidence; the complete
+interaction/fault/layout matrix and human UX remain unfinished. Development is not
+a blanket release, cross-platform compatibility claim or authority for formal saves.
 
-## Current playable capabilities
+The normal survey/confirmation UI hides exact coordinates, region identities,
+preview hashes and executor internals. Existing `/industrialagent` commands
+remain the advanced engineering surface; the larger expandable advanced GUI is
+still WIP.
 
-- Test-world marker and important-world protection
-- Verified offline backup and restore-drill evidence
-- Bounded region selection and preview
-- Dry-run and twenty-five-check readiness validation
-- `gravel x3` automated production
-- `iron_sheet x2` automated production
-- `BUILD / CONNECT / FEED / PROCESS / VERIFY` execution stages
-- Status inspection, bounded cancellation and journal-owned cleanup
-- BUILD recovery after save, exit and re-entry
+C-05 Crushing has completed its automated development checkpoint on the
+unreleased Phase IV branch. One verified opposed-wheel/hopper/chest plan
+executes real gravel-to-sand processing through Direct, two active player-shaped
+Bots and Hybrid, with typed failure injection and exact pre-resource recovery.
+The disposable DeceasedCraft profile also identifies a safe runtime raw-copper
+crushing recipe. This does not expand the published Alpha pilot targets or
+authorize an important/formal world. See
+`docs/C05_CRUSHING_EXECUTION.md`.
 
-## Not supported yet
+The project has a frozen, tested `generic-foundation-v1`, a completed deterministic goal-planning foundation and the completed R-01 through R-08 Create Runtime Knowledge Foundation. Current code provides loader-neutral industrial graphs, process/step/session models, bounded execution and verification, conservative journaling/recovery, typed placement feasibility, whole-plan quarter-turn transforms and an exact v606 server-thread catalog that enumerates/fingerprints the actual runtime `RecipeManager`. R-02 maps supported runtime milling, pressing and crushing recipes while preserving exact/alternative/tag input identity and returning per-recipe typed limitations instead of guessing. Runtime-attributed capabilities and implementation binding feed verified logical and physical plans. The production Create 6.0.6 development paths physically verify three bounded templates: water-wheel millstone processing, belt-fed mechanical pressing and opposed crushing wheels with hopper/chest output. Additional Phase IV capabilities, arbitrary layout generation, obstacle avoidance, a real Mekanism adapter and natural-language execution remain unavailable.
 
-- Bot construction groups
-- Full scheduling across multiple production lines
-- Most other Create machines
-- Immersive Engineering
-- Electrical grids or nuclear reactors
-- Natural-language execution
-- Autonomous operation in an important or formal main save
+## Baseline
 
-## Installation and commands
+- Java 17
+- Minecraft 1.20.1
+- Forge development baseline 47.4.10; external compatibility target 47.4.0
+- Create 6.0.6 Maven build 150 (matches the installed JAR's Git hash and embedded dependency versions)
+- Mekanism optional; not present in the observed DeceasedCraft instance
 
-- [Installation](INSTALLATION.md)
-- [Quick start](QUICK_START.md)
-- [Complete command reference and usage](COMMAND_REFERENCE.md)
-- [Compatibility](COMPATIBILITY.md)
-- [Known issues](KNOWN_ISSUES.md)
-- [Roadmap](ROADMAP.md)
-- [Changelog](CHANGELOG.md)
+## Build
 
-Always verify the release JAR against `SHA256SUMS.txt` on the GitHub Release
-page before installing it.
-
-## Build from source
-
-Use a Java 17 JDK:
+Install a Java 17 JDK or set `JAVA_HOME`. Copy `.env.example` values into environment variables, or create an ignored `local.properties` for this machine.
 
 ```powershell
-.\gradlew.bat clean build
+.\scripts\Test-Core.ps1
+.\scripts\Build.ps1
 ```
 
-The production JAR is written to
-`forge-create-1.20.1/build/libs/steve-industrial-agent-0.1.0-alpha.1.jar`.
-The build is configured for deterministic archive ordering and timestamps.
-Minecraft, Forge, Create, DeceasedCraft and all other third-party mods are
-user-installed dependencies and are never bundled in the project JAR.
+Build output is under `forge-create-1.20.1/build/libs/`. Development worlds stay under `forge-create-1.20.1/run/`.
 
-## Safety model
+The candidate binary is `steve-industrial-agent-0.1.0-alpha.1.jar`.
+Third-party loaders, mods, packs and world files are never included.
 
-Free text and model output cannot directly execute commands, arbitrary code or
-unchecked coordinates. World reads and mutations are server-authoritative and
-bounded. The public runtime fails closed unless the current instance, world
-marker, backup, selected region, preview, readiness checks and confirmation all
-match. High-risk nuclear and radiation automation is disabled.
+## Deployment safety status
 
-## License and third-party software
+PW-01 through PW-12 are complete: canonical environment classification, fail-closed policy/write guards, deterministic preview/risk/budget evidence, exact region/approval gates, isolated-only verified backup/restore, a generic claim-permission Adapter boundary, an independent twenty-five-check readiness aggregator and typed server-authoritative read-only deploy commands. `/industrialagent deploy preview|risks|budget|readiness <resource_id> <quantity> [orientation]` reports the current verified physical projection but never creates a ready execution session, reserves/consumes resources, starts a machine, accepts free-text coordinates or mutates a world. Every configured important/formal root remains non-executable. FS-01 through FS-12 completed the explicitly authorized guarded offline read-only survey, and FB-01 through FB-08 completed a verified external backup plus disposable restore drill. Exact formal-source pre/post fingerprints match. Eight candidates and eight approval requests remain UNKNOWN/awaiting user selection, with unavailable previews and no formal approval or execution authority. See `docs/FORMAL_WORLD_BACKUP.md`, `docs/FORMAL_WORLD_RESTORE_DRILL.md`, `docs/FORMAL_DEPLOYMENT_CANDIDATES.md` and `docs/FORMAL_DEPLOYMENT_APPROVAL.md`.
 
-Steve Industrial Agent is licensed under the MIT License. See [LICENSE](LICENSE),
-[NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Third-party
-loaders, mods, modpacks, launcher files, worlds, backups and account data are
-not redistributed.
+## In-game Phase 1 command
+
+With the development client running and sufficient command permission:
+
+```text
+/industrialagent scan create 8
+/industrialagent scan mekanism 8
+/industrialagent scan all 8
+```
+
+The scan is read-only, server-thread-only, command-triggered, and capped at radius 16.
+
+## Public disposable-world pilot
+
+The release runtime now provides Forge configuration, an exact world-local
+test marker, bounded region selection and preview, portable verified
+backup/restore evidence, twenty-five-check readiness, visible
+gravel and iron-sheet execution, status/cancel, journal-owned cleanup and
+durable player-command recovery. The accepted live runs produced gravel 3/3
+and iron sheets 2/2 in a disposable creative test world; the final iron-sheet run persisted at
+BUILD, survived save-to-title/re-entry, resumed by exact rescan without repeated
+placement/consumption/output and traversed CONNECT/FEED/PROCESS/VERIFY. Water
+containment, Create belt cleanup, fault refusal and all recovery phases have
+dedicated regressions. The configured important-instance root remains non-executable and recorded zero
+launches and zero writes during the pilot. See
+`INSTALLATION.md`, `QUICK_START.md`, `COMMAND_REFERENCE.md` and
+`docs/PILOT_USER_GUIDE.md`.
+
+## Continue with Codex
+
+Open this repository root as the Codex project named **Steve Industrial Agent**, then continue from the existing task after reading `AGENTS.md`, `docs/PROJECT_STATE.md`, and `docs/BACKLOG.md`. Do not select the PCL2 directory or a Minecraft save as the project root.
+
+## Upstream and license
+
+The architecture was researched against [YuvDwi/Steve](https://github.com/YuvDwi/Steve) at commit `034afb53ed383efcef0084616022c57d6d2b8c02`. No upstream source has been copied at this milestone. See `NOTICE` and `docs/DECISIONS.md`. This project is licensed under MIT; see `LICENSE`.

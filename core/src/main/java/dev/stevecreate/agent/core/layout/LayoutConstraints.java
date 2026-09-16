@@ -2,6 +2,7 @@ package dev.stevecreate.agent.core.layout;
 
 import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.QuarterTurn;
+import dev.stevecreate.agent.core.player.LayoutVariant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -17,7 +18,27 @@ public record LayoutConstraints(
         long itemRouteCapacity,
         long rotationalPowerCapacity,
         long stressCapacity,
-        PlacementSnapshot snapshot) {
+        PlacementSnapshot snapshot,
+        LayoutVariant layoutVariant,
+        int moduleSpacing) {
+    /** Source-compatible default for existing verified standard layouts. */
+    public LayoutConstraints(
+            BlockPos3i anchor,
+            List<QuarterTurn> allowedOrientations,
+            int maximumCandidates,
+            int maximumSearchRadius,
+            int maximumRouteLength,
+            int searchBudget,
+            long itemRouteCapacity,
+            long rotationalPowerCapacity,
+            long stressCapacity,
+            PlacementSnapshot snapshot) {
+        this(anchor, allowedOrientations, maximumCandidates, maximumSearchRadius,
+                maximumRouteLength, searchBudget, itemRouteCapacity,
+                rotationalPowerCapacity, stressCapacity, snapshot,
+                LayoutVariant.STANDARD, LayoutVariant.STANDARD.fixedModuleSpacing());
+    }
+
     public LayoutConstraints {
         Objects.requireNonNull(anchor, "anchor");
         if (anchor.equals(new BlockPos3i(0, 0, 0))) {
@@ -25,9 +46,8 @@ public record LayoutConstraints(
         }
         Objects.requireNonNull(allowedOrientations, "allowedOrientations");
         allowedOrientations = List.copyOf(new LinkedHashSet<>(allowedOrientations));
-        if (allowedOrientations.isEmpty() || allowedOrientations.size() > 3
-                || allowedOrientations.contains(QuarterTurn.CLOCKWISE_180)) {
-            throw new IllegalArgumentException("only the three accepted Create orientations are allowed");
+        if (allowedOrientations.isEmpty() || allowedOrientations.size() > 4) {
+            throw new IllegalArgumentException("one to four quarter-turn orientations are required");
         }
         if (maximumCandidates < 1 || maximumCandidates > 256
                 || maximumSearchRadius < 1 || maximumSearchRadius > 128
@@ -39,5 +59,14 @@ public record LayoutConstraints(
             throw new IllegalArgumentException("layout capacities must be positive");
         }
         Objects.requireNonNull(snapshot, "snapshot");
+        Objects.requireNonNull(layoutVariant, "layoutVariant");
+        boolean validSpacing = switch (layoutVariant) {
+            case COMPACT -> moduleSpacing >= 1 && moduleSpacing < 16;
+            case STANDARD -> moduleSpacing == 16;
+            case EXPANDABLE -> moduleSpacing == 24;
+        };
+        if (!validSpacing) {
+            throw new IllegalArgumentException("module spacing does not match the selected layout variant");
+        }
     }
 }

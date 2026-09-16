@@ -16,6 +16,7 @@ MixinExtras, DeceasedCraft or another mod JAR.
 | MixinExtras | 0.4.1 | Integration dependency | MIT; not redistributed here |
 | JUnit Jupiter | 5.10.2 | Test only | EPL-2.0; not in release JAR |
 | AssertJ Core | 3.25.3 | Test only | Apache-2.0; not in release JAR |
+| CLI-Anything | upstream main snapshot, accessed 2026-08-10 | `repl_skin.py` and `preview_bundle.py` in the source-only acceptance harness | Apache-2.0; see `acceptance-harness/THIRD_PARTY_LICENSES/CLI-Anything-Apache-2.0.txt`; not in release JAR |
 
 DeceasedCraft and every mod, asset, configuration, script and world belonging
 to that pack remain outside this project's distribution. Users obtain the

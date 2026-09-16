@@ -15,6 +15,22 @@ public enum ImplementationPortRole {
             "rotational_power_input",
             Optional.of(GenericResourceType.ROTATIONAL_POWER),
             PortMode.INPUT),
+    ROTATIONAL_POWER_OUTPUT(
+            "rotational_power_output",
+            Optional.of(GenericResourceType.ROTATIONAL_POWER),
+            PortMode.OUTPUT),
+    ELECTRICAL_ENERGY_INPUT(
+            "electrical_energy_input",
+            Optional.of(GenericResourceType.ELECTRICAL_ENERGY),
+            PortMode.INPUT),
+    ELECTRICAL_ENERGY_OUTPUT(
+            "electrical_energy_output",
+            Optional.of(GenericResourceType.ELECTRICAL_ENERGY),
+            PortMode.OUTPUT),
+    HEAT_INPUT("heat_input", Optional.of(GenericResourceType.HEAT), PortMode.INPUT),
+    HEAT_OUTPUT("heat_output", Optional.of(GenericResourceType.HEAT), PortMode.OUTPUT),
+    AIRFLOW_INPUT("airflow_input", Optional.of(GenericResourceType.AIRFLOW), PortMode.INPUT),
+    AIRFLOW_OUTPUT("airflow_output", Optional.of(GenericResourceType.AIRFLOW), PortMode.OUTPUT),
     REDSTONE_CONTROL("redstone_control", Optional.empty(), PortMode.INPUT),
     SIGNAL_INPUT("signal_input", Optional.empty(), PortMode.INPUT),
     SIGNAL_OUTPUT("signal_output", Optional.empty(), PortMode.OUTPUT),

@@ -42,15 +42,15 @@ class CreateTopologyGraphTest {
         MachineNode press = graph.node(BeltPressGenericExecutionPlan.MECHANICAL_PRESS_NODE_ID);
         MachineNode chest = graph.node(BeltPressGenericExecutionPlan.OUTPUT_CHEST_NODE_ID);
 
-        assertThat(graph.nodes()).hasSize(9);
-        assertThat(graph.ports()).hasSize(20);
-        assertThat(graph.edges()).hasSize(10);
+        assertThat(graph.nodes()).hasSize(27);
+        assertThat(graph.ports()).hasSize(28);
+        assertThat(graph.edges()).hasSize(14);
         assertThat(graph.nodes().values())
                 .filteredOn(node -> node.implementationId().equals(id("create:belt")))
                 .hasSize(3);
         assertThat(graph.edges().values())
                 .filteredOn(edge -> edge.resourceType() == GenericResourceType.ROTATIONAL_POWER)
-                .hasSize(4);
+                .hasSize(8);
         assertThat(graph.edges().values())
                 .filteredOn(edge -> edge.resourceType() == GenericResourceType.ITEM)
                 .hasSize(6);

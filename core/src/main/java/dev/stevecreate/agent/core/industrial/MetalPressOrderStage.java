@@ -1,0 +1,25 @@
+package dev.stevecreate.agent.core.industrial;
+
+/** Durable checkpoints for one bounded IE Metal Press plate order. */
+public enum MetalPressOrderStage {
+    MATERIAL_SOURCE_SELECTION,
+    MATERIALS_RESERVED,
+    MATERIALS_WITHDRAWN,
+    MATERIALS_DELIVERED,
+    STRUCTURE_BUILT,
+    MULTIBLOCK_FORMED,
+    MOLD_INSTALLED,
+    POWER_NETWORK_BUILT,
+    POWER_VERIFIED,
+    INPUT_QUEUED,
+    PROCESSING,
+    ENERGY_SETTLED,
+    OUTPUT_OBSERVED,
+    TEARDOWN,
+    BASELINE_RESTORED,
+    MATERIALS_RETURNED,
+    REPORT_GENERATED,
+    COMPLETED,
+    PAUSED,
+    CANCELLED
+}

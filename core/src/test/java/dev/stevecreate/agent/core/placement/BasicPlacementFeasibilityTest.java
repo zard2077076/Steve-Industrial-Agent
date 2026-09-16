@@ -29,7 +29,7 @@ class BasicPlacementFeasibilityTest {
             assertThat(c03Report.feasible()).isTrue();
             assertThat(c03Report.targetCount()).isEqualTo(17);
             assertThat(c04Report.feasible()).isTrue();
-            assertThat(c04Report.targetCount()).isEqualTo(8);
+            assertThat(c04Report.targetCount()).isEqualTo(26);
         }
     }
 

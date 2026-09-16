@@ -12,6 +12,14 @@ import dev.stevecreate.agent.adapter.api.RuntimeKnowledgeFailure;
 import dev.stevecreate.agent.adapter.api.RuntimeRecipeCatalogResult;
 import dev.stevecreate.agent.adapter.api.RuntimeRecipeCatalogSnapshot;
 import dev.stevecreate.agent.adapter.api.RuntimeRecipeMappingWarning;
+import dev.stevecreate.agent.adapter.api.create.CapabilityCensusSummary;
+import dev.stevecreate.agent.adapter.api.create.CapabilityOutput;
+import dev.stevecreate.agent.adapter.api.create.CapabilityRecipeLimitation;
+import dev.stevecreate.agent.adapter.api.create.CapabilityRecipeSemantics;
+import dev.stevecreate.agent.adapter.api.create.CreateCapabilityId;
+import dev.stevecreate.agent.adapter.api.create.FluidIngredientSemantics;
+import dev.stevecreate.agent.adapter.api.create.RuntimeCapabilityCensusSnapshot;
+import dev.stevecreate.agent.core.model.ResourceId;
 import dev.stevecreate.agent.core.planning.RecipeIngredient;
 import dev.stevecreate.agent.core.planning.RuntimeRecipeCatalogEntry;
 import dev.stevecreate.agent.core.process.ProcessResource;
@@ -86,6 +94,8 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
                             + " detail=" + failure.detail());
         }
         RuntimeRecipeCatalogSnapshot snapshot = success.snapshot();
+        RuntimeCapabilityCensusSnapshot capabilityCensus =
+                CreateRuntimeCapabilityCensus.capture(level, snapshot);
 
         List<SequencedAssemblyRecipe> sequenced = recipes.stream()
                 .filter(SequencedAssemblyRecipe.class::isInstance)
@@ -109,12 +119,20 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
 
         JsonObject summary = new JsonObject();
         summary.addProperty("recipeManagerTotal", recipes.size());
+        summary.addProperty("mappedCrushingMillingPressing", snapshot.mappedRecipeCount());
+        summary.addProperty("rejectedCrushingMillingPressing", snapshot.limitations().size());
+        // Retained for consumers of the R-09 v1 schema; Phase IV uses the correctly named fields.
         summary.addProperty("mappedMillingPressing", snapshot.mappedRecipeCount());
         summary.addProperty("rejectedMillingPressing", snapshot.limitations().size());
         summary.addProperty("mappingWarnings", snapshot.warnings().size());
         summary.addProperty("sequencedAssemblyRecipes", sequenced.size());
         summary.addProperty("sequencedPressingSteps", sequencedPressingSteps);
         summary.addProperty("loadedModContainers", ModList.get().getMods().size());
+        summary.addProperty("capabilityExpansionRecipes", capabilityCensus.recipes().size());
+        summary.addProperty("capabilityExpansionSupportedPhaseI", capabilityCensus.recipes().stream()
+                .filter(recipe -> recipe.support()
+                        == dev.stevecreate.agent.adapter.api.create.CapabilityRecipeSupport.SUPPORTED_PHASE_I)
+                .count());
         root.add("summary", summary);
         root.add("recipeTypeCounts", mapToJson(typeCounts));
         root.add("recipeNamespaceCounts", mapToJson(namespaceCounts));
@@ -128,6 +146,8 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
                 typeCounts.getOrDefault("create:splashing", 0L));
         root.add("createRecipeTypeCounts", createCounts);
         root.add("mapping", mappingJson(snapshot));
+        root.add("c05CrushingAcceptance", c05CrushingAcceptanceJson(snapshot));
+        root.add("capabilityExpansion", capabilityCensusJson(capabilityCensus));
         root.add("sequencedAssembly", sequencedJson(sequenced));
         root.add("sourceClues", sourceCluesJson(recipes));
         root.add("loadedMods", loadedModsJson());
@@ -149,6 +169,7 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
                 recipes.size(),
                 typeCounts.getOrDefault("create:milling", 0L),
                 typeCounts.getOrDefault("create:pressing", 0L),
+                typeCounts.getOrDefault("create:crushing", 0L),
                 sequenced.size(),
                 sequencedPressingSteps,
                 snapshot.mappedRecipeCount(),
@@ -217,6 +238,49 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
         return mapping;
     }
 
+    private static JsonObject c05CrushingAcceptanceJson(
+            RuntimeRecipeCatalogSnapshot snapshot) {
+        ResourceId preferred = ResourceId.parse(
+                "deceasedcraft:crushing_wheel/crushing/raw_materials/copper");
+        List<RuntimeRecipeCatalogEntry> packCrushing = snapshot.catalog().recipes().stream()
+                .filter(entry -> entry.recipeType().equals(
+                        ResourceId.parse("create:crushing")))
+                .filter(entry -> entry.recipeId().namespace().equals("deceasedcraft"))
+                .sorted(Comparator
+                        .comparing((RuntimeRecipeCatalogEntry entry) ->
+                                !entry.recipeId().equals(preferred))
+                        .thenComparing(entry -> entry.recipeId().toString()))
+                .toList();
+        JsonObject value = new JsonObject();
+        value.addProperty("selectionPolicy",
+                "item-only deterministic primary output; prefer bounded raw-copper tag recipe");
+        value.addProperty("worldMutation", false);
+        value.addProperty("executionSessionCreated", false);
+        if (packCrushing.isEmpty()) {
+            value.addProperty("status", "NOT_PRESENT");
+            value.addProperty("reason",
+                    "No mapped deceasedcraft-namespace Create crushing recipe has a deterministic primary output");
+            return value;
+        }
+        RuntimeRecipeCatalogEntry selected = packCrushing.get(0);
+        value.addProperty("status", "PRESENT");
+        value.addProperty("recipeId", selected.recipeId().toString());
+        value.addProperty("recipeType", selected.recipeType().toString());
+        value.addProperty("runtimeVerified", selected.source().runtimeVerified());
+        value.addProperty("runtimeFingerprint", selected.source().runtimeFingerprint());
+        value.add("inputs", ingredientsJson(selected.inputs()));
+        value.add("outputs", resourcesJson(selected.outputs()));
+        value.add("optionalByproducts", resourcesJson(selected.optionalByproducts()));
+        value.addProperty("processingTicks",
+                selected.processingTicks().isPresent()
+                        ? selected.processingTicks().getAsLong()
+                        : null);
+        value.addProperty("safeForPhaseIv", true);
+        value.addProperty("safetyBoundary",
+                "item entity input and chest output only; no block mining, entity interaction, container opening, fluid, radiation, or arbitrary world use");
+        return value;
+    }
+
     private static JsonObject sequencedJson(List<SequencedAssemblyRecipe> recipes) {
         JsonObject result = new JsonObject();
         result.addProperty("supportStatus", "typed-unsupported");
@@ -256,6 +320,206 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
         }
         result.add("recipes", values);
         return result;
+    }
+
+    private static JsonObject capabilityCensusJson(RuntimeCapabilityCensusSnapshot snapshot) {
+        JsonObject census = new JsonObject();
+        census.addProperty("schema", "steve-industrial:create-capability-census/v1");
+        census.addProperty("evidenceSource", "authoritative-server-RecipeManager");
+        census.addProperty("serverAuthoritative", snapshot.serverAuthoritative());
+        census.addProperty("worldMutation", snapshot.worldMutation());
+        census.addProperty("executorCreated", false);
+        census.addProperty("runtimeFingerprint", snapshot.runtimeFingerprint());
+        census.addProperty("worldIdentity", snapshot.worldIdentity());
+        census.addProperty("reloadGeneration", snapshot.reloadGeneration());
+        census.addProperty("recipeManagerTotal", snapshot.recipeManagerCount());
+        census.addProperty("targetRecipeTotal", snapshot.recipes().size());
+
+        Map<String, Long> counts = new TreeMap<>();
+        snapshot.targetRecipeTypeCounts().forEach((key, value) ->
+                counts.put(key.toString(), value));
+        census.add("targetRecipeTypeCounts", mapToJson(counts));
+
+        JsonObject supportMatrix = new JsonObject();
+        for (CreateCapabilityId capability : CreateCapabilityId.canonicalValues()) {
+            CapabilityCensusSummary summary = snapshot.summaries().get(capability);
+            JsonObject value = new JsonObject();
+            value.addProperty("phaseCode", capability.phaseCode());
+            value.addProperty("recipeType", capability.recipeType().toString());
+            value.addProperty("implementationCapabilityId",
+                    capability.implementationCapabilityId().toString());
+            value.addProperty("discovered", summary.discovered());
+            value.addProperty("supportedPhaseI", summary.supportedPhaseI());
+            value.addProperty("semanticsOnly", summary.semanticsOnly());
+            value.addProperty("unsupported", summary.unsupported());
+            value.addProperty("notPresent", summary.notPresent());
+            JsonArray candidates = new JsonArray();
+            summary.acceptanceCandidates().forEach(candidate -> candidates.add(candidate.toString()));
+            value.add("acceptanceCandidates", candidates);
+            supportMatrix.add(capability.name(), value);
+        }
+        census.add("supportMatrix", supportMatrix);
+
+        JsonArray recipes = new JsonArray();
+        for (CapabilityRecipeSemantics recipe : snapshot.recipes()) {
+            JsonObject value = new JsonObject();
+            value.addProperty("recipeId", recipe.recipeId().toString());
+            value.addProperty("recipeType", recipe.recipeType().toString());
+            value.addProperty("capability", recipe.capability().name());
+            value.addProperty("phaseCode", recipe.capability().phaseCode());
+            value.addProperty("support", recipe.support().name());
+            value.addProperty("processingTicks",
+                    recipe.processingTicks().isPresent()
+                            ? recipe.processingTicks().getAsLong()
+                            : null);
+            value.add("itemInputs", ingredientsJson(recipe.itemInputs()));
+            value.add("fluidInputs", fluidIngredientsJson(recipe.fluidInputs()));
+            value.add("fluidOutputs", resourcesJson(recipe.fluidOutputs()));
+            value.add("itemOutputs", capabilityOutputsJson(recipe.itemOutputs().outputs()));
+            JsonObject probability = new JsonObject();
+            probability.addProperty("denominator", recipe.probabilisticOutputs().denominator());
+            probability.addProperty("hasProbabilisticOutput",
+                    recipe.probabilisticOutputs().hasProbabilisticOutput());
+            probability.addProperty("deterministicPrimary",
+                    recipe.probabilisticOutputs().primaryIsDeterministic());
+            probability.addProperty("independentRolls", recipe.itemOutputs().independentRolls());
+            probability.addProperty("outputOrderPreserved",
+                    recipe.itemOutputs().outputOrderPreserved());
+            value.add("probability", probability);
+            value.add("requirements", requirementsJson(recipe));
+            value.add("limitations", limitationsJson(recipe.limitations()));
+            recipes.add(value);
+        }
+        census.add("recipes", recipes);
+        return census;
+    }
+
+    private static JsonArray fluidIngredientsJson(List<FluidIngredientSemantics> ingredients) {
+        JsonArray values = new JsonArray();
+        for (FluidIngredientSemantics ingredient : ingredients) {
+            JsonObject value = new JsonObject();
+            value.addProperty("kind", ingredient.kind().name());
+            value.addProperty("identity", ingredient.identity().map(Object::toString).orElse(""));
+            value.addProperty("amountMilliBuckets", ingredient.amountMilliBuckets());
+            value.addProperty("runtimeFingerprint", ingredient.runtimeFingerprint().orElse(""));
+            value.addProperty("unsupportedDetail", ingredient.unsupportedDetail().orElse(""));
+            JsonArray candidates = new JsonArray();
+            ingredient.runtimeCandidates().forEach(candidate -> candidates.add(candidate.toString()));
+            value.add("runtimeCandidates", candidates);
+            values.add(value);
+        }
+        return values;
+    }
+
+    private static JsonArray capabilityOutputsJson(List<CapabilityOutput> outputs) {
+        JsonArray values = new JsonArray();
+        for (CapabilityOutput output : outputs) {
+            JsonObject value = new JsonObject();
+            value.addProperty("outputIndex", output.outputIndex());
+            value.addProperty("resourceId", output.resource().resourceId().toString());
+            value.addProperty("resourceType", output.resource().resourceType().serializedName());
+            value.addProperty("amount", output.resource().amount());
+            value.addProperty("probabilityPerMillion", output.probabilityPerMillion());
+            value.addProperty("primary", output.primary());
+            value.addProperty("guaranteed", output.guaranteed());
+            values.add(value);
+        }
+        return values;
+    }
+
+    private static JsonObject requirementsJson(CapabilityRecipeSemantics recipe) {
+        var environment = recipe.environment();
+        JsonObject value = new JsonObject();
+        value.addProperty("heat", environment.heat().name());
+        value.addProperty("medium", environment.medium().name());
+        value.addProperty("itemProcessingOnly", environment.itemProcessingOnly());
+        value.addProperty("arbitraryWorldInteractionForbidden",
+                environment.arbitraryWorldInteractionForbidden());
+        value.addProperty("playerInventoryForbidden",
+                environment.heldItem().playerInventoryForbidden());
+        JsonObject direction = new JsonObject();
+        direction.addProperty("required", environment.directionalFlow().required());
+        direction.addProperty("rotationDirection",
+                environment.directionalFlow().rotationDirection().name());
+        direction.addProperty("inputOutputOpposed",
+                environment.directionalFlow().inputOutputOpposed());
+        direction.addProperty("minimumClearanceBlocks",
+                environment.directionalFlow().minimumClearanceBlocks());
+        value.add("directionalFlow", direction);
+        JsonObject airflow = new JsonObject();
+        airflow.addProperty("required", environment.airflow().required());
+        airflow.addProperty("medium", environment.airflow().medium().name());
+        airflow.addProperty("minimumReachBlocks", environment.airflow().minimumReachBlocks());
+        airflow.addProperty("obstructionFreePath", environment.airflow().obstructionFreePath());
+        airflow.addProperty("liveFlowObservationRequired",
+                environment.airflow().liveFlowObservationRequired());
+        airflow.addProperty("dwellCompletionRequired",
+                environment.airflow().dwellCompletionRequired());
+        value.add("airflow", airflow);
+        JsonObject basin = new JsonObject();
+        basin.addProperty("required", environment.basin().required());
+        basin.addProperty("maximumItemInputs", environment.basin().maximumItemInputs());
+        basin.addProperty("maximumFluidInputs", environment.basin().maximumFluidInputs());
+        basin.addProperty("heatSourceObservationRequired",
+                environment.basin().heatSourceObservationRequired());
+        basin.addProperty("outputCapacityObservationRequired",
+                environment.basin().outputCapacityObservationRequired());
+        value.add("basin", basin);
+        JsonObject held = new JsonObject();
+        held.addProperty("present", environment.heldItem().heldItem().isPresent());
+        held.addProperty("identity", environment.heldItem().heldItem()
+                .map(RecipeIngredient::canonicalIdentity).orElse(""));
+        held.addProperty("consumed", environment.heldItem().consumed());
+        held.addProperty("stateBeforeAfterRequired",
+                environment.heldItem().stateBeforeAfterRequired());
+        value.add("heldItem", held);
+        JsonObject tool = new JsonObject();
+        tool.addProperty("present", environment.tool().tool().isPresent());
+        tool.addProperty("identity", environment.tool().tool()
+                .map(RecipeIngredient::canonicalIdentity).orElse(""));
+        tool.addProperty("consumption", environment.tool().consumption().name());
+        tool.addProperty("stateReadbackRequired", environment.tool().stateReadbackRequired());
+        value.add("tool", tool);
+        JsonObject catalyst = new JsonObject();
+        catalyst.addProperty("present", environment.catalyst().catalyst().isPresent());
+        catalyst.addProperty("identity", environment.catalyst().catalyst()
+                .map(RecipeIngredient::canonicalIdentity).orElse(""));
+        catalyst.addProperty("returnedAfterProcessing",
+                environment.catalyst().returnedAfterProcessing());
+        catalyst.addProperty("stateReadbackRequired",
+                environment.catalyst().stateReadbackRequired());
+        value.add("catalyst", catalyst);
+        JsonObject speed = new JsonObject();
+        speed.addProperty("minimumAbsoluteRpm",
+                environment.minimumSpeed().minimumAbsoluteRpm().isPresent()
+                        ? environment.minimumSpeed().minimumAbsoluteRpm().getAsLong()
+                        : null);
+        speed.addProperty("exactRuntimeThresholdRequired",
+                environment.minimumSpeed().exactRuntimeThresholdRequired());
+        value.add("minimumSpeed", speed);
+        JsonObject observation = new JsonObject();
+        JsonArray signals = new JsonArray();
+        environment.runtimeObservation().signals().forEach(signal -> signals.add(signal.name()));
+        observation.add("signals", signals);
+        observation.addProperty("maximumObservationTicks",
+                environment.runtimeObservation().maximumObservationTicks());
+        observation.addProperty("fixedSleepForbidden",
+                environment.runtimeObservation().fixedSleepForbidden());
+        value.add("runtimeObservation", observation);
+        return value;
+    }
+
+    private static JsonArray limitationsJson(List<CapabilityRecipeLimitation> limitations) {
+        JsonArray values = new JsonArray();
+        for (CapabilityRecipeLimitation limitation : limitations) {
+            JsonObject value = new JsonObject();
+            value.addProperty("code", limitation.code().name());
+            value.addProperty("field", limitation.field());
+            value.addProperty("detail", limitation.detail());
+            value.addProperty("blocksPhaseI", limitation.blocksPhaseI());
+            values.add(value);
+        }
+        return values;
     }
 
     private static JsonObject sourceCluesJson(List<Recipe<?>> recipes) {
@@ -380,6 +644,7 @@ public final class DeceasedCraftRuntimeKnowledgeExporter {
             int recipeManagerTotal,
             long millingCount,
             long pressingCount,
+            long crushingCount,
             int sequencedAssemblyCount,
             long sequencedPressingStepCount,
             int mappedCount,

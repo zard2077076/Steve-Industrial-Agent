@@ -50,17 +50,17 @@ public final class CreateBeltPressGameTests {
     private CreateBeltPressGameTests() {
     }
 
-    @GameTest(template = "bastion/mobs/empty", templateNamespace = "minecraft", timeoutTicks = 1_800)
+    @GameTest(batch = "c04_zero", template = "bastion/mobs/empty", templateNamespace = "minecraft", timeoutTicks = 1_800)
     public static void beltPressProducesIronSheet(GameTestHelper helper) {
         runPlan(helper, QuarterTurn.ZERO);
     }
 
-    @GameTest(template = "bastion/mobs/empty", templateNamespace = "minecraft", timeoutTicks = 1_800)
+    @GameTest(batch = "c04_clockwise_90", template = "bastion/mobs/empty", templateNamespace = "minecraft", timeoutTicks = 1_800)
     public static void beltPressProducesIronSheetClockwise90(GameTestHelper helper) {
         runPlan(helper, QuarterTurn.CLOCKWISE_90);
     }
 
-    @GameTest(template = "bastion/mobs/empty", templateNamespace = "minecraft", timeoutTicks = 1_800)
+    @GameTest(batch = "c04_clockwise_270", template = "bastion/mobs/empty", templateNamespace = "minecraft", timeoutTicks = 1_800)
     public static void beltPressProducesIronSheetClockwise270(GameTestHelper helper) {
         runPlan(helper, QuarterTurn.CLOCKWISE_270);
     }
@@ -91,11 +91,11 @@ public final class CreateBeltPressGameTests {
                 BeltPressPlan.at(position(remoteOrigin), rotation));
         checkFailure(remote, AdapterFailureCode.CHUNK_NOT_LOADED, "unloaded belt/press preflight");
         String remoteDetail = ((AdapterResult.Failure<BeltPressExecutionSession>) remote).detail();
-        check(remoteDetail.contains("conflicts=8 positions=8"),
+        check(remoteDetail.contains("conflicts=26 positions=26"),
                 "C-04 unloaded feasibility did not report every target: " + remoteDetail);
         check(!level.hasChunk(remoteChunk.x, remoteChunk.z), "C-04 belt/press preflight loaded a remote chunk");
         LOGGER.info(
-                "CREATE_BELT_PRESS_UNLOADED_CHUNK chunk={},{} before=false code=CHUNK_NOT_LOADED conflicts=8 positions=8 after=false",
+                "CREATE_BELT_PRESS_UNLOADED_CHUNK chunk={},{} before=false code=CHUNK_NOT_LOADED conflicts=26 positions=26 after=false",
                 remoteChunk.x,
                 remoteChunk.z);
 
@@ -151,11 +151,11 @@ public final class CreateBeltPressGameTests {
                             .collect(Collectors.joining(";")));
             LOGGER.info(
                     "CREATE_BELT_PRESS_POWER PASS beltDriveRpm={} beltStartRpm={} beltPressingRpm={} beltEndRpm={} pressDriveRpm={} mechanicalPressRpm={}",
-                    evidence.observedSpeedRpm().get(BeltPressRole.BELT_DRIVE),
+                    evidence.observedSpeedRpm().get(BeltPressRole.BELT_DRIVE_SHAFT),
                     evidence.observedSpeedRpm().get(BeltPressRole.BELT_START),
                     evidence.observedSpeedRpm().get(BeltPressRole.BELT_PRESSING),
                     evidence.observedSpeedRpm().get(BeltPressRole.BELT_END),
-                    evidence.observedSpeedRpm().get(BeltPressRole.PRESS_DRIVE),
+                    evidence.observedSpeedRpm().get(BeltPressRole.PRESS_DRIVE_SHAFT),
                     evidence.observedSpeedRpm().get(BeltPressRole.MECHANICAL_PRESS));
             LOGGER.info(
                     "CREATE_BELT_PRESS_RECIPE PASS id={} type={} input={} consumed={} output={} observed={} recipeDuration={} pressCycleTicks={} inputObservedOnBelt={} pressCycleObserved={} outputObservedInChest={}",
@@ -307,11 +307,11 @@ public final class CreateBeltPressGameTests {
                 .filter(InjectedResourceChange.class::isInstance).count();
         long irreversible = journal.entries().stream()
                 .filter(IrreversibleProcessingChange.class::isInstance).count();
-        check(journal.entries().size() == 12, "C-04 journal entry count changed");
-        check(blockChanges == 10, "C-04 journal block-change count changed");
+        check(journal.entries().size() == 32, "C-04 journal entry count changed");
+        check(blockChanges == 30, "C-04 journal block-change count changed");
         check(injectedInputs == 1, "C-04 journal input count changed");
         check(irreversible == 1, "C-04 journal irreversible-process count changed");
-        check(journal.modifiedPositions().size() == 8, "C-04 journal position count changed");
+        check(journal.modifiedPositions().size() == 28, "C-04 journal position count changed");
         LOGGER.info(
                 "CREATE_BELT_PRESS_JOURNAL PASS entries={} blockChanges={} injectedInputs={} irreversibleProcessing={} modifiedPositions={}",
                 journal.entries().size(),
@@ -339,8 +339,8 @@ public final class CreateBeltPressGameTests {
             ServerLevel level,
             BeltPressPlan plan) {
         BeltPressPlacement beltStart = plan.placement(BeltPressRole.BELT_START);
-        BeltPressPlacement beltDrive = plan.placement(BeltPressRole.BELT_DRIVE);
-        BeltPressPlacement pressDrive = plan.placement(BeltPressRole.PRESS_DRIVE);
+        BeltPressPlacement beltDrive = plan.placement(BeltPressRole.BELT_DRIVE_SHAFT);
+        BeltPressPlacement pressDrive = plan.placement(BeltPressRole.PRESS_DRIVE_SHAFT);
         BeltPressPlacement mechanicalPress = plan.placement(BeltPressRole.MECHANICAL_PRESS);
         BeltPressPlacement outputFunnel = plan.placement(BeltPressRole.OUTPUT_FUNNEL);
 
@@ -350,26 +350,26 @@ public final class CreateBeltPressGameTests {
         BeltBlock beltBlock = (BeltBlock) beltState.getBlock();
         Direction.Axis beltAxis = beltBlock.getRotationAxis(beltState);
         Direction beltFacing = beltState.getValue(BeltBlock.HORIZONTAL_FACING);
-        Direction beltDriveFacing = stateFacing(level.getBlockState(blockPosition(beltDrive.position())));
-        Direction pressDriveFacing = stateFacing(level.getBlockState(blockPosition(pressDrive.position())));
+        Direction.Axis beltDriveAxis = stateAxis(level.getBlockState(blockPosition(beltDrive.position())));
+        Direction.Axis pressDriveAxis = stateAxis(level.getBlockState(blockPosition(pressDrive.position())));
         Direction mechanicalPressFacing = stateFacing(
                 level.getBlockState(blockPosition(mechanicalPress.position())));
         Direction funnelFacing = stateFacing(level.getBlockState(blockPosition(outputFunnel.position())));
 
         check(beltAxis == axis(beltStart.rotationAxis()), "C-04 transformed belt axis mismatch");
         check(beltFacing == facing(beltStart.facing()), "C-04 transformed belt facing mismatch");
-        check(beltDriveFacing == facing(beltDrive.facing()), "C-04 transformed belt-drive facing mismatch");
-        check(pressDriveFacing == facing(pressDrive.facing()), "C-04 transformed press-drive facing mismatch");
+        check(beltDriveAxis == axis(beltDrive.rotationAxis()), "C-04 transformed belt-drive axis mismatch");
+        check(pressDriveAxis == axis(pressDrive.rotationAxis()), "C-04 transformed press-drive axis mismatch");
         check(mechanicalPressFacing == facing(mechanicalPress.facing()),
                 "C-04 transformed mechanical-press facing mismatch");
         check(funnelFacing == facing(outputFunnel.facing()), "C-04 transformed funnel facing mismatch");
         LOGGER.info(
-                "CREATE_BELT_PRESS_PLAN_TRANSFORM PASS rotation={} beltAxis={} beltFacing={} beltDriveFacing={} pressDriveFacing={} mechanicalPressFacing={} funnelFacing={}",
+                "CREATE_BELT_PRESS_PLAN_TRANSFORM PASS rotation={} beltAxis={} beltFacing={} beltDriveAxis={} pressDriveAxis={} mechanicalPressFacing={} funnelFacing={}",
                 plan.rotation(),
                 beltAxis.name(),
                 beltFacing.name(),
-                beltDriveFacing.name(),
-                pressDriveFacing.name(),
+                beltDriveAxis.name(),
+                pressDriveAxis.name(),
                 mechanicalPressFacing.name(),
                 funnelFacing.name());
     }
@@ -404,6 +404,12 @@ public final class CreateBeltPressGameTests {
                 : null;
     }
 
+    private static Direction.Axis stateAxis(BlockState state) {
+        return state.hasProperty(BlockStateProperties.AXIS)
+                ? state.getValue(BlockStateProperties.AXIS)
+                : null;
+    }
+
     private static String sequence(BeltPressPlan plan) {
         return plan.buildSteps().stream()
                 .map(CreateBeltPressGameTests::stepDescription)
@@ -416,9 +422,7 @@ public final class CreateBeltPressGameTests {
 
     private static BlockPos fixtureAnchor(QuarterTurn rotation) {
         return switch (rotation) {
-            case ZERO -> new BlockPos(0, 2, 1);
-            case CLOCKWISE_90 -> new BlockPos(1, 2, 0);
-            case CLOCKWISE_270 -> new BlockPos(0, 2, 3);
+            case ZERO, CLOCKWISE_90, CLOCKWISE_270 -> new BlockPos(3, 2, 3);
             case CLOCKWISE_180 -> throw new IllegalArgumentException(
                     "C-04 GameTest does not register the 180-degree physical fixture");
         };

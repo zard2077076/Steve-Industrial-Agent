@@ -133,7 +133,7 @@ public final class ExecutionReadinessVerifier {
             }
         }
         for (PhysicalMachinePlacement placement : plan.placements()) {
-            if (!contiguous(placement.rotationalPowerRoute())) {
+            if (!contiguousPowerRoute(placement)) {
                 return refusal(ExecutionReadinessFailureCode.POWER_SOURCE_MISSING,
                         ExecutionReadinessStage.AREA_REVALIDATION, plan.id(), context.requestedSessionId(),
                         placement.anchor(), placement.implementationId(),
@@ -273,6 +273,43 @@ public final class ExecutionReadinessVerifier {
             if (distance != 1) return false;
         }
         return true;
+    }
+
+    private static boolean contiguousPowerRoute(PhysicalMachinePlacement placement) {
+        List<BlockPos3i> values = placement.rotationalPowerRoute();
+        if (values.size() < 2) return false;
+        Map<BlockPos3i, ResourceId> componentBlocks = new LinkedHashMap<>();
+        placement.components().forEach(component ->
+                componentBlocks.put(component.position(), component.blockId()));
+        for (int index = 1; index < values.size(); index++) {
+            BlockPos3i left = values.get(index - 1);
+            BlockPos3i right = values.get(index);
+            int dx = Math.abs(left.x() - right.x());
+            int dy = Math.abs(left.y() - right.y());
+            int dz = Math.abs(left.z() - right.z());
+            if (dx + dy + dz == 1) continue;
+            if (dy != 0 || dx != 1 || dz != 1
+                    || !reviewedCreateDiagonalMesh(
+                            componentBlocks.get(left), componentBlocks.get(right))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Create's large cogwheel meshes diagonally in its plane with a small cogwheel or
+     * the integrated cog on a Mechanical Mixer. Both endpoints must be exact owned
+     * components; an arbitrary diagonal gap is still refused by readiness and the
+     * version-confined runtime handler must subsequently observe the live network.
+     */
+    private static boolean reviewedCreateDiagonalMesh(ResourceId left, ResourceId right) {
+        if (left == null || right == null) return false;
+        ResourceId large = ResourceId.parse("create:large_cogwheel");
+        ResourceId small = ResourceId.parse("create:cogwheel");
+        ResourceId mixer = ResourceId.parse("create:mechanical_mixer");
+        return (left.equals(large) && (right.equals(small) || right.equals(mixer)))
+                || (right.equals(large) && (left.equals(small) || left.equals(mixer)));
     }
 
     private static void add(

@@ -9,6 +9,8 @@ import dev.stevecreate.agent.core.planning.MaterialConstraints;
 import dev.stevecreate.agent.core.planning.PlanningStrategyPreference;
 import dev.stevecreate.agent.core.planning.ProductionGoal;
 import dev.stevecreate.agent.core.planning.RecipeIngredient;
+import dev.stevecreate.agent.core.planning.RecipeHeatRequirement;
+import dev.stevecreate.agent.core.planning.RecipeHeatTier;
 import dev.stevecreate.agent.core.planning.RecipeSource;
 import dev.stevecreate.agent.core.planning.RuntimeRecipeCatalogEntry;
 import dev.stevecreate.agent.core.process.ProcessResource;
@@ -21,6 +23,44 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class RuntimeRecipeCatalogResolverTest {
+    @Test
+    void retainsHeatedMetadataBesideTheUnchangedResolvedRecipeContract() {
+        ResourceId recipeId = id("create:mixing/brass_ingot");
+        ResourceId recipeType = id("create:mixing");
+        RecipeHeatRequirement heat = new RecipeHeatRequirement(
+                id("test:heated_mixing"), RecipeHeatTier.HEATED,
+                recipeId, recipeType, true,
+                Set.of(id("test:preflight")), Set.of(id("test:evidence")),
+                Set.of(id("test:diagnostic")),
+                Optional.of(item("minecraft:coal", 1)));
+        RuntimeRecipeCatalogEntry entry = new RuntimeRecipeCatalogEntry(
+                recipeId,
+                recipeType,
+                List.of(new RecipeIngredient.ExactResource(
+                        id("minecraft:copper_ingot"), 1)),
+                List.of(item("create:brass_ingot", 2)),
+                List.of(),
+                Set.of(recipeType),
+                Set.of(GenericResourceType.ITEM, GenericResourceType.ROTATIONAL_POWER),
+                OptionalLong.of(100),
+                new RecipeSource(id("test:adapter"), "create", "sha256:runtime", true),
+                heat);
+
+        ResolvedRuntimeRecipeCatalog resolved = requireSuccess(resolve(
+                List.of(entry), goal(
+                        "create:brass_ingot",
+                        Map.of(id("minecraft:copper_ingot"), 1L))));
+
+        assertThat(resolved.resolutions()).singleElement().satisfies(value -> {
+            assertThat(value.runtimeEntry().heatRequirement()).isEqualTo(heat);
+            assertThat(value.resolvedRecipe().recipeId()).isEqualTo(recipeId);
+            assertThat(value.resolvedRecipe().recipeType()).isEqualTo(recipeType);
+            assertThat(value.resolvedRecipe().inputs())
+                    .containsExactly(item("minecraft:copper_ingot", 1));
+        });
+        assertThat(resolved.catalog().find(recipeId)).isPresent();
+    }
+
     @Test
     void ownedCandidatesWinAndTiesUseStableResourceIdentity() {
         RuntimeRecipeCatalogEntry entry = recipe(

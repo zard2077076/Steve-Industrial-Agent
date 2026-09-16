@@ -1,0 +1,16 @@
+package dev.stevecreate.agent.core.siteprep;
+
+public enum DemolitionApprovalFailure {
+    WORLD_MISMATCH,
+    DIMENSION_MISMATCH,
+    PLAN_HASH_MISMATCH,
+    SITE_SNAPSHOT_STALE,
+    PLAYER_MISMATCH,
+    CONTEXT_MISMATCH,
+    SCOPE_MISMATCH,
+    PROTECTED_OR_UNKNOWN_REQUESTED,
+    EXPIRED,
+    REVOKED,
+    ALREADY_CONSUMED,
+    MUTATION_BUDGET_EXCEEDED
+}

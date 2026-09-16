@@ -70,11 +70,12 @@ class PhysicalizationServiceTest {
     }
 
     @Test
-    void physicalizesSingleMachineInAllThreeAcceptedOrientationsDeterministically() {
+    void physicalizesSingleMachineInAllFourAcceptedOrientationsDeterministically() {
         VerifiedImplementationBoundPlan bound = bindSingle();
         ImmutableMachineGeometryCatalog geometries = geometries("fixture:mill");
         for (QuarterTurn orientation : List.of(
-                QuarterTurn.ZERO, QuarterTurn.CLOCKWISE_90, QuarterTurn.CLOCKWISE_270)) {
+                QuarterTurn.ZERO, QuarterTurn.CLOCKWISE_90,
+                QuarterTurn.CLOCKWISE_180, QuarterTurn.CLOCKWISE_270)) {
             LayoutConstraints constraints = constraints(snapshot(Map.of()), List.of(orientation), 64, 100_000, 64, 64);
             VerifiedPhysicalPlan first = success(service.physicalize(bound, geometries, constraints));
             VerifiedPhysicalPlan second = success(service.physicalize(bound, geometries, constraints));
@@ -184,6 +185,32 @@ class PhysicalizationServiceTest {
     }
 
     @Test
+    void readinessAcceptsOnlyOwnedReviewedCreateDiagonalGearMeshes() {
+        VerifiedImplementationBoundPlan bound = bindSingle();
+        VerifiedPhysicalPlan geared = success(service.physicalize(
+                bound, new ImmutableMachineGeometryCatalog(
+                        List.of(diagonalGeometry("create:large_cogwheel",
+                                "create:cogwheel")), FINGERPRINT),
+                constraints(snapshot(Map.of()), List.of(QuarterTurn.ZERO),
+                        64, 100_000, 64, 64)));
+        assertThat(new ExecutionReadinessVerifier().verify(
+                geared, new ReadyFacts(geared).context()))
+                .isInstanceOf(ExecutionReadinessSuccess.class);
+
+        VerifiedPhysicalPlan arbitraryDiagonal = success(service.physicalize(
+                bound, new ImmutableMachineGeometryCatalog(
+                        List.of(diagonalGeometry("minecraft:stone",
+                                "minecraft:stone")), FINGERPRINT),
+                constraints(snapshot(Map.of()), List.of(QuarterTurn.ZERO),
+                        64, 100_000, 64, 64)));
+        ExecutionReadinessResult refused = new ExecutionReadinessVerifier().verify(
+                arbitraryDiagonal, new ReadyFacts(arbitraryDiagonal).context());
+        assertThat(refused).isInstanceOf(ExecutionReadinessRefusal.class);
+        assertThat(((ExecutionReadinessRefusal) refused).failure().code())
+                .isEqualTo(ExecutionReadinessFailureCode.POWER_SOURCE_MISSING);
+    }
+
+    @Test
     void readinessRefusesStaleAreaResourcesAuthoritySafetyAndDuplicateSessionsPrecisely() {
         VerifiedPhysicalPlan physical = success(service.physicalize(
                 bindSingle(), geometries("fixture:mill"),
@@ -258,7 +285,8 @@ class PhysicalizationServiceTest {
                 new ClearanceVolume(Set.of(
                         new BlockPos3i(-1, 0, 0), new BlockPos3i(0, 0, 0),
                         new BlockPos3i(1, 0, 0), new BlockPos3i(0, 1, 0))),
-                Set.of(QuarterTurn.ZERO, QuarterTurn.CLOCKWISE_90, QuarterTurn.CLOCKWISE_270),
+                Set.of(QuarterTurn.ZERO, QuarterTurn.CLOCKWISE_90,
+                        QuarterTurn.CLOCKWISE_180, QuarterTurn.CLOCKWISE_270),
                 List.of(new GeometryComponent(
                         id("fixture:machine_role"), id("fixture:machine_block"),
                         new BlockPos3i(0, 0, 0), Map.of())),
@@ -275,6 +303,32 @@ class PhysicalizationServiceTest {
                                 PortMode.INPUT, 32)),
                 List.of(new BlockPos3i(0, 0, 1), new BlockPos3i(0, 0, 0)),
                 32, 8, "fixture:power->machine");
+    }
+
+    private static MachineGeometryDescriptor diagonalGeometry(
+            String firstBlock, String secondBlock) {
+        ResourceId implementation = id("fixture:mill");
+        BlockPos3i first = new BlockPos3i(0, 0, 0);
+        BlockPos3i second = new BlockPos3i(1, 0, 1);
+        return new MachineGeometryDescriptor(
+                implementation,
+                new MachineFootprint(Set.of(first, second)),
+                new ClearanceVolume(Set.of(
+                        new BlockPos3i(-1, 0, 0), first, second,
+                        new BlockPos3i(1, 1, 0))),
+                Set.of(QuarterTurn.ZERO),
+                List.of(
+                        new GeometryComponent(id("fixture:first"), id(firstBlock), first, Map.of()),
+                        new GeometryComponent(id("fixture:second"), id(secondBlock), second, Map.of())),
+                List.of(
+                        new PhysicalPortRule(id("fixture:mill_input"), new BlockPos3i(-1, 1, 0),
+                                Optional.of(Direction6.WEST), GenericResourceType.ITEM, PortMode.INPUT, 64),
+                        new PhysicalPortRule(id("fixture:mill_output"), new BlockPos3i(1, 1, 0),
+                                Optional.of(Direction6.EAST), GenericResourceType.ITEM, PortMode.OUTPUT, 64),
+                        new PhysicalPortRule(id("fixture:mill_power"), first,
+                                Optional.of(Direction6.SOUTH), GenericResourceType.ROTATIONAL_POWER,
+                                PortMode.INPUT, 32)),
+                List.of(first, second), 32, 8, "fixture:reviewed_diagonal_mesh");
     }
 
     private static LayoutConstraints constraints(

@@ -32,12 +32,12 @@ class BeltPressGenericExecutionPlanTest {
 
         assertThat(generic.machineGraph().id())
                 .isEqualTo(BeltPressGenericExecutionPlan.GRAPH_ID);
-        assertThat(generic.machineGraph().nodes()).hasSize(9);
-        assertThat(generic.machineGraph().ports()).hasSize(20);
-        assertThat(generic.machineGraph().edges()).hasSize(10);
+        assertThat(generic.machineGraph().nodes()).hasSize(27);
+        assertThat(generic.machineGraph().ports()).hasSize(28);
+        assertThat(generic.machineGraph().edges()).hasSize(14);
         assertThat(generic.machineGraph().node(
                         BeltPressGenericExecutionPlan.BELT_START_NODE_ID)
-                .relativePosition()).isEqualTo(new BlockPos3i(0, 1, 0));
+                .relativePosition()).isEqualTo(new BlockPos3i(2, 1, 0));
         assertThat(generic.machineGraph().node(
                         BeltPressGenericExecutionPlan.MECHANICAL_PRESS_NODE_ID)
                 .relativePosition()).isEqualTo(new BlockPos3i(1, 3, 0));

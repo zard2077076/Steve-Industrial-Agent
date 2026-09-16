@@ -2,12 +2,30 @@ package dev.stevecreate.agent.core.plan;
 
 /** A typed C-04 construction role; temporary pulley shafts are not final evidence roles. */
 public enum BeltPressBuildRole {
+    BELT_FLOW_FLOOR,
+    BELT_FLOW_OUTER_FLOOR,
+    BELT_FLOW_OUTER_WEST_WALL,
+    BELT_FLOW_OUTER_EAST_WALL,
+    BELT_FLOW_NORTH_WALL,
+    BELT_BASE_START,
+    BELT_BASE_PRESSING,
+    BELT_BASE_END,
+    PRESS_FLOW_FLOOR,
+    PRESS_FLOW_OUTER_FLOOR,
+    PRESS_FLOW_EAST_WALL,
+    PRESS_FLOW_NORTH_WALL,
+    BELT_WATER_WHEEL,
+    BELT_GEARBOX,
+    BELT_DRIVE_SHAFT,
+    PRESS_WATER_WHEEL,
+    PRESS_GEARBOX,
+    PRESS_DRIVE_SHAFT,
     BELT_START_PULLEY_SHAFT,
     BELT_END_PULLEY_SHAFT,
-    BELT_DRIVE,
-    PRESS_DRIVE,
     MECHANICAL_PRESS,
     OUTPUT_CHEST,
     OUTPUT_FUNNEL,
+    BELT_WATER_SOURCE,
+    PRESS_WATER_SOURCE,
     CONNECT_BELT
 }

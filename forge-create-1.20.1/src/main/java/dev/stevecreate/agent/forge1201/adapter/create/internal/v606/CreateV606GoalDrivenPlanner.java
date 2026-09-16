@@ -63,7 +63,24 @@ public final class CreateV606GoalDrivenPlanner {
             Map<ResourceId, Long> availableInputs,
             ExecutionWorldClassification worldClassification) {
         return planInternal(level, target, quantity, ownedResources, physicalAnchor,
-                orientation, sessionId, availableInputs, worldClassification, Set.of());
+                orientation, sessionId, availableInputs, worldClassification, Set.of(),
+                MaterialConstraints.none());
+    }
+
+    public static PlanningResult plan(
+            ServerLevel level,
+            ResourceId target,
+            long quantity,
+            Map<ResourceId, Long> ownedResources,
+            BlockPos3i physicalAnchor,
+            QuarterTurn orientation,
+            ResourceId sessionId,
+            Map<ResourceId, Long> availableInputs,
+            ExecutionWorldClassification worldClassification,
+            MaterialConstraints materialConstraints) {
+        return planInternal(level, target, quantity, ownedResources, physicalAnchor,
+                orientation, sessionId, availableInputs, worldClassification, Set.of(),
+                Objects.requireNonNull(materialConstraints, "materialConstraints"));
     }
 
     public static PlanningResult planForRecovery(
@@ -77,10 +94,28 @@ public final class CreateV606GoalDrivenPlanner {
             Map<ResourceId, Long> availableInputs,
             ExecutionWorldClassification worldClassification,
             Set<BlockPos3i> journalOwnedPositions) {
+        return planForRecovery(level, target, quantity, ownedResources, physicalAnchor,
+                orientation, sessionId, availableInputs, worldClassification,
+                journalOwnedPositions, MaterialConstraints.none());
+    }
+
+    public static PlanningResult planForRecovery(
+            ServerLevel level,
+            ResourceId target,
+            long quantity,
+            Map<ResourceId, Long> ownedResources,
+            BlockPos3i physicalAnchor,
+            QuarterTurn orientation,
+            ResourceId sessionId,
+            Map<ResourceId, Long> availableInputs,
+            ExecutionWorldClassification worldClassification,
+            Set<BlockPos3i> journalOwnedPositions,
+            MaterialConstraints materialConstraints) {
         Objects.requireNonNull(journalOwnedPositions, "journalOwnedPositions");
         return planInternal(level, target, quantity, ownedResources, physicalAnchor,
                 orientation, sessionId, availableInputs, worldClassification,
-                Set.copyOf(journalOwnedPositions));
+                Set.copyOf(journalOwnedPositions),
+                Objects.requireNonNull(materialConstraints, "materialConstraints"));
     }
 
     private static PlanningResult planInternal(
@@ -93,7 +128,8 @@ public final class CreateV606GoalDrivenPlanner {
             ResourceId sessionId,
             Map<ResourceId, Long> availableInputs,
             ExecutionWorldClassification worldClassification,
-            Set<BlockPos3i> journalOwnedPositions) {
+            Set<BlockPos3i> journalOwnedPositions,
+            MaterialConstraints materialConstraints) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(target, "target");
         Objects.requireNonNull(ownedResources, "ownedResources");
@@ -102,6 +138,7 @@ public final class CreateV606GoalDrivenPlanner {
         Objects.requireNonNull(sessionId, "sessionId");
         Objects.requireNonNull(availableInputs, "availableInputs");
         Objects.requireNonNull(worldClassification, "worldClassification");
+        Objects.requireNonNull(materialConstraints, "materialConstraints");
         if (!level.getServer().isSameThread()) {
             return failure(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
                     "Planning must run on the authoritative server thread");
@@ -141,7 +178,7 @@ public final class CreateV606GoalDrivenPlanner {
                     implementationSuccess.snapshot();
             ProductionGoal goal = new ProductionGoal(
                     target, GenericResourceType.ITEM, quantity, Set.of(), Set.of(), Optional.of(8),
-                    MaterialConstraints.none(), List.of(
+                    materialConstraints, List.of(
                             PlanningStrategyPreference.MINIMIZE_STEPS,
                             PlanningStrategyPreference.PREFER_OWNED_RESOURCES), ownedResources);
             var planningResult = new RuntimeKnowledgePlanningService().plan(
@@ -182,6 +219,31 @@ public final class CreateV606GoalDrivenPlanner {
                                 + ((PhysicalizationFailure) physicalResult).failure().code());
             }
             VerifiedPhysicalPlan physical = physicalSuccess.plan();
+            CreateV606ExecutionMetadataBinder.BindResult metadataResult =
+                    new CreateV606ExecutionMetadataBinder().bind(
+                            planningSuccess, bound, physical, sessionId);
+            if (metadataResult
+                    instanceof CreateV606ExecutionMetadataBinder.Failure metadataFailure) {
+                return failure(
+                        ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
+                        "Recipe execution metadata binding failed: "
+                                + metadataFailure.detail());
+            }
+            CreateV606VerifiedExecutionMetadata executionMetadata =
+                    ((CreateV606ExecutionMetadataBinder.Bound) metadataResult)
+                            .metadata();
+            for (var reservation : executionMetadata.fuelReservations()) {
+                long available = availableInputs.getOrDefault(
+                        reservation.fuel().resourceId(), 0L);
+                if (available < reservation.fuel().amount()) {
+                    return failure(
+                            ExecutionReadinessFailureCode.INPUT_RESOURCE_MISSING,
+                            "Verified HEATED fuel is unavailable: resource="
+                                    + reservation.fuel().resourceId()
+                                    + " required=" + reservation.fuel().amount()
+                                    + " available=" + available);
+                }
+            }
             Set<BlockPos3i> loaded = snapshot.cells().entrySet().stream()
                     .filter(entry -> entry.getValue() != LayoutCellState.UNLOADED)
                     .map(Map.Entry::getKey)
@@ -198,13 +260,19 @@ public final class CreateV606GoalDrivenPlanner {
             ExecutionReadinessResult readinessResult = new ExecutionReadinessVerifier().verify(
                     physical, readiness);
             if (readinessResult instanceof ExecutionReadinessRefusal refusal) {
-                return failure(refusal.failure().code(), refusal.failure().detail());
+                String resource = refusal.failure().resourceId()
+                        .map(value -> " resource=" + value)
+                        .orElse("");
+                return failure(
+                        refusal.failure().code(),
+                        refusal.failure().detail() + resource);
             }
             return new Ready(
                     ((ExecutionReadinessSuccess) readinessResult).plan(), recipes.runtime(),
                     recipes.runtimeFingerprint(), recipes.reloadGeneration(),
                     planningSuccess.resolvedRecipes().resolutions().stream()
-                            .flatMap(value -> value.selections().stream()).toList());
+                            .flatMap(value -> value.selections().stream()).toList(),
+                    executionMetadata);
         } catch (RuntimeException exception) {
             return failure(ExecutionReadinessFailureCode.EXECUTION_NOT_READY,
                     "Goal-driven planning failed closed: " + exception.getMessage());
@@ -235,12 +303,21 @@ public final class CreateV606GoalDrivenPlanner {
             dev.stevecreate.agent.adapter.api.RuntimeFingerprint runtime,
             String runtimeRecipeFingerprint,
             long reloadGeneration,
-            List<RuntimeIngredientSelection> ingredientSelections) implements PlanningResult {
+            List<RuntimeIngredientSelection> ingredientSelections,
+            CreateV606VerifiedExecutionMetadata executionMetadata) implements PlanningResult {
         public Ready {
             Objects.requireNonNull(executionReadyPlan, "executionReadyPlan");
             Objects.requireNonNull(runtime, "runtime");
             Objects.requireNonNull(runtimeRecipeFingerprint, "runtimeRecipeFingerprint");
             ingredientSelections = List.copyOf(ingredientSelections);
+            Objects.requireNonNull(executionMetadata, "executionMetadata");
+            if (!executionMetadata.sessionId().equals(
+                    executionReadyPlan.sessionId())
+                    || !executionMetadata.runtimeFingerprint().equals(
+                            runtimeRecipeFingerprint)) {
+                throw new IllegalArgumentException(
+                        "Verified execution metadata differs from the ready plan/runtime");
+            }
         }
     }
 

@@ -1,0 +1,9 @@
+# Backup and restore safety
+
+PW-09 provides verified backup and restore only for repository-owned disposable isolated fixtures. It inventories canonical regular files without following links, records per-file SHA-256 and an aggregate manifest hash, verifies capacity and staging policy, publishes through same-filesystem atomic rename, and proves restore by rehashing the complete source. Formal, unknown and forbidden environments fail before filesystem access.
+
+PW-11 does not broaden that authority. Its readiness verifier requires the exact current backup plan, manifest, completed restore drill and journal identity as independent evidence, then combines them with twenty-one other checks. A valid backup cannot authorize execution, compensate for stale or denied evidence, or enable a formal-world read or write. `DeploymentReadyPlan` remains immutable audit data with no restore, session, resource or mutation method.
+
+The current two-stage formal-world task supplies that separate explicit authorization for one READ-only source backup outside `D:\PCL2` and a disposable restore drill. FS-12 has read the selected formal save under its guarded survey boundary. FB-01 through FB-03 now prove destination, copy, persisted identity, verification and restore contracts on repository-owned fixtures only; no real formal backup or restore has yet run. FB-07 must still prove fresh process/handle quiescence, exact pre/post source fingerprints and the real external backup/readback before any formal backup is called complete. None of this authorizes restoring over the formal source.
+
+PW-12 performs no backup operation and accepts no filesystem path. Its readiness/risk reports deliberately list `BACKUP_PLAN`, `BACKUP_MANIFEST` and `RESTORE_VERIFICATION` as missing, so a preview cannot be mistaken for recoverability.

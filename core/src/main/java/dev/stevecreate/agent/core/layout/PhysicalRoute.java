@@ -23,4 +23,20 @@ public record PhysicalRoute(
         positions = List.copyOf(Objects.requireNonNull(positions, "positions"));
         if (positions.size() < 2) throw new IllegalArgumentException("route must contain endpoints");
     }
+
+    /**
+     * The cells a route actually builds, which is every cell but its two ends.
+     *
+     * <p>The ends are the ports of the machines being joined; they already exist and
+     * belong to those machines. Only the span between them is new construction.
+     *
+     * <p>This lived as a loop inside the executor and nowhere else, so the layer that
+     * prices a build had no way to know how many cells it would lay or what they cost —
+     * and the player path refused any plan with routes at all rather than guess. One
+     * definition, read by whoever needs it.</p>
+     */
+    public List<BlockPos3i> interiorPositions() {
+        return positions.size() <= 2 ? List.of() : List.copyOf(
+                positions.subList(1, positions.size() - 1));
+    }
 }

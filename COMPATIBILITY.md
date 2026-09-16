@@ -4,6 +4,11 @@
 Forge 47.4.0、Create 6.0.6。DeceasedCraft Beta 5.10.16 是既有真实物理验收组合；
 面向发布的全新独立客户端仍待用户肉眼验收。
 
+未发布 Phase IV 分支额外通过 C-05 自动化开发验证：Forge 47.4.10/Create
+6.0.6 的标准隔离世界完成 gravel crushing，DeceasedCraft Beta 5.10.16
+一次性副本的真实配方目录识别出安全 raw-copper crushing 候选。该证据不改变
+`0.1.0-alpha.1` 的对外兼容或支持矩阵，也不允许在正式 PCL2 世界执行。
+
 只支持新建、可删除的创造模式测试世界，以及 `minecraft:gravel x3` 和
 `create:iron_sheet x2` 两个固定 pilot。生产配置不要求仓库 JVM 属性或 `work`
 证据；环境变量和 `-Dsteve_industrial.runtime.*` 仅是高级覆盖，普通玩家使用 Forge

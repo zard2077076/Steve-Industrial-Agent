@@ -16,3 +16,7 @@ logs/
 local.properties
 secrets.properties
 .env
+acceptance-harness/.venv/
+acceptance-harness/*.egg-info/
+acceptance-harness/.pytest_cache/
+acceptance-harness/**/__pycache__/

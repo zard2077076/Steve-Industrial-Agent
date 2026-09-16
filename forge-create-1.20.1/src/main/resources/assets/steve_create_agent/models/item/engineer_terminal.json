@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "steve_create_agent:item/engineer_terminal"
+  }
+}

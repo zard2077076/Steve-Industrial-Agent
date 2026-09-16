@@ -18,6 +18,7 @@ import dev.stevecreate.agent.core.execution.GenericExecutionSessionStatus;
 import dev.stevecreate.agent.core.execution.GenericStepRunState;
 import dev.stevecreate.agent.core.execution.StepCondition;
 import dev.stevecreate.agent.core.execution.StepRunResult;
+import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.ResourceId;
 import dev.stevecreate.agent.core.plan.BeltPressBuildStep;
 import dev.stevecreate.agent.core.plan.BeltPressGenericExecutionPlan;
@@ -204,6 +205,7 @@ public final class Create606BeltPressExecutor {
                     recoveredSession.sessionId(),
                     recoveredJournal,
                     recoveredBuildCursor(physicalPlan, recoveredJournal),
+                    recoveredPilotFlowCursor(physicalPlan, recoveredJournal),
                     resourceBuffer);
             this.runner = new BoundedStepRunner(
                     Map.of(
@@ -449,12 +451,28 @@ public final class Create606BeltPressExecutor {
     private static int recoveredBuildCursor(BeltPressPlan plan, WorldChangeJournal journal) {
         int changes = 0;
         if (journal.entries().isEmpty()) return 0;
+        int billableEntries = plan.buildSteps().stream()
+                .mapToInt(step -> step instanceof BeltPressBuildStep.PlaceBlock ? 1 : 3)
+                .sum();
+        if (journal.entries().size() >= billableEntries) return plan.buildSteps().size();
         for (int index = 0; index < plan.buildSteps().size(); index++) {
             changes += plan.buildSteps().get(index) instanceof BeltPressBuildStep.PlaceBlock ? 1 : 3;
             if (changes == journal.entries().size()) return index + 1;
             if (changes > journal.entries().size()) return -1;
         }
         return -1;
+    }
+
+    private static int recoveredPilotFlowCursor(
+            BeltPressPlan plan, WorldChangeJournal journal) {
+        int billableEntries = plan.buildSteps().stream()
+                .mapToInt(step -> step instanceof BeltPressBuildStep.PlaceBlock ? 1 : 3)
+                .sum();
+        int flow = journal.entries().size() - billableEntries;
+        if (flow < 0) return 0;
+        if (flow > 2) throw new IllegalArgumentException(
+                "Recovered C-04 journal exceeds the two bounded water channels");
+        return flow;
     }
 
     private static List<dev.stevecreate.agent.core.model.BlockPos3i> expectedBuildChangePositions(
@@ -470,6 +488,10 @@ public final class Create606BeltPressExecutor {
                 positions.add(connection.endPosition());
             }
         }
+        BlockPos3i beltSource = plan.placement(BeltPressRole.BELT_WATER_SOURCE).position();
+        positions.add(beltSource.translate(0, -1, 0));
+        BlockPos3i pressSource = plan.placement(BeltPressRole.PRESS_WATER_SOURCE).position();
+        positions.add(pressSource.translate(0, -1, 0));
         return List.copyOf(positions);
     }
 

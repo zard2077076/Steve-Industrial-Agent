@@ -73,10 +73,11 @@ public final class DeceasedCraftPackProfileProbe {
             DeceasedCraftRuntimeKnowledgeExporter.ExportSummary knowledge =
                     DeceasedCraftRuntimeKnowledgeExporter.export(server.overworld(), actualGameDir);
             logger.info(
-                    "R09_PACK_RUNTIME_KNOWLEDGE_PASS total={} milling={} pressing={} sequencedAssembly={} sequencedPressingSteps={} mapped={} rejected={} warnings={} fingerprint={} evidence={} staticScriptCountsUsedAsRuntimeTruth=false worldMutation=false sessionCreated=false",
+                    "R09_PACK_RUNTIME_KNOWLEDGE_PASS total={} milling={} pressing={} crushing={} sequencedAssembly={} sequencedPressingSteps={} mapped={} rejected={} warnings={} fingerprint={} evidence={} staticScriptCountsUsedAsRuntimeTruth=false worldMutation=false sessionCreated=false",
                     knowledge.recipeManagerTotal(),
                     knowledge.millingCount(),
                     knowledge.pressingCount(),
+                    knowledge.crushingCount(),
                     knowledge.sequencedAssemblyCount(),
                     knowledge.sequencedPressingStepCount(),
                     knowledge.mappedCount(),

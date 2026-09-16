@@ -3,6 +3,10 @@
 > 本表对应发布 JAR 的生产配置、世界标记和便携备份流程。最终客户端肉眼验收仍待完成，
 > 因而这里不宣称 RC_READY。
 
+> Phase IV 的 C-05 Crushing 当前只是未发布分支上的自动化验收能力，没有新增面向玩家
+> 的施工命令，也没有把 Alpha pilot 目标扩展到砂或铜处理。开发者只应在仓库内运行
+> `.\scripts\Test-C05Crushing.ps1`；不得把该脚本指向 PCL2 或正式存档。
+
 所有命令要求 OP/作弊权限。施工命令只接受固定的资源 ID、数量和受信方向，不接受
 自然语言、任意路径、任意坐标或代码。以下“会改世界”只表示通过全部门禁后，是否会
 在已确认的测试区域内改变方块/资源。
@@ -101,3 +105,64 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Complete-Industr
 - `duplicate session`：先查看 status，必要时 cancel/cleanup/recovery。
 - `cleanup unsafe/ownership mismatch`：停止，保留诊断包，不手工强制批量删除。
 - `recovery unsafe`：接受保守拒绝，使用 cleanup 或从已验证备份恢复。
+# Phase IV-C player terminal (development branch)
+
+In an explicitly marked disposable test world, obtain the terminal through its
+crafting recipe or with `/give @s steve_create_agent:engineer_terminal`. Right
+click opens the bilingual goal picker. During placement, the wheel rotates,
+Shift+wheel changes Compact/Standard/Expandable layout, right click requests
+an authoritative survey, and left click or Esc cancels the local preview. The
+survey page can launch the bounded safer-site search or open Review & Confirm.
+The approval button remains disabled for protected blocks, containers/data,
+unknown blocks or hazards; successful approval is short-lived and exact-scope.
+After approval, Select Salvage closes the screen: look at a dedicated chest or
+barrel inside the nearby bounded work envelope and right-click it. The final
+Start Bot Clearing screen is still an undo window. A full/changed container
+pauses without partial delivery; make room or restore it before resuming.
+Manage Project opens the evidence HUD controls for a live clearing session.
+After a server-process restart the same project is shown as paused and requires
+a fresh preview/approval; UI SavedData is never treated as execution authority.
+After a successful rescan the player selects material sources, reserves the exact
+bill and starts construction through the shared material-ledger workflow. Completion
+and safe cancellation/return are implemented; coverage depends on the executor and
+runtime. See `docs/PROJECT_STATE.md` for actual current verification.
+Existing `/industrialagent site ...` and pilot commands remain the advanced
+and debug interface; the UI does not bypass them or create new write authority.
+
+# Composite production orders (development branch)
+
+A Composite order runs several real processing stages in sequence and carries
+the intermediate between them through a physical locked-hopper route. Only the
+reviewed graphs in the catalog can be ordered; the runtime still re-plans and
+re-reserves everything before any machine is built.
+
+- `/steveagent composite catalog` — lists every orderable graph with the exact
+  material it will reserve and the salvage it will hand back.
+- `/steveagent composite create <order_type> <material_source> <site_origin> <direct|bots|hybrid> [secondary_source]`
+  — starts one player-owned order. The optional `secondary_source` lets the
+  reservation span a second explicitly named chest; no nearby-container discovery
+  is performed. `material_source` is your own chest. `site_origin` anchors
+  the derived layout: for `composite/01` it becomes the first stage's source
+  chest and the line runs east; for `composite/03` it becomes the split hopper's
+  ground cell, with the raw chest directly above it and the two branches to
+  either side.
+- `/steveagent composite status` — per-node progress of the running order.
+- `/steveagent composite cancel` — stops the run. Installed infrastructure is
+  deliberately left standing for inspection and the order is paused, not
+  reported complete.
+
+The order charges every boundary chest, hopper and route lock as ordinary
+reserved material, so a Composite never conjures its own containers. On
+success the finished output and all settled salvage are moved back into the
+chest you selected before the site is cleared. If the ledger, the route
+evidence, the exact output, the salvage or the cleanup cannot all be proven,
+the order pauses with a typed reason instead of reporting success.
+
+If the server restarts while an order is running, the order is paused at
+`RELOAD_RECONCILIATION_REQUIRED` and nothing is replayed: no machine is rebuilt,
+no report is written and no further material is taken from your chest. There is
+still no way to continue such an order, but `composite cancel` now works after a
+restart: it clears the site and returns everything not already consumed to the
+chest you selected. Material consumed by stages that already finished is spent
+and does not come back, so a restart mid-run still costs you the completed
+stages' inputs.

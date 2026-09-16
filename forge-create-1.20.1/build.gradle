@@ -15,6 +15,35 @@ base {
 // profile and is never part of the production binary or sources JAR.
 sourceSets {
     createOnlyClientAcceptance
+    // A second Forge mod loaded only by the external player-acceptance launcher.
+    // Its localhost control surface is not compiled into the production JAR.
+    clientAcceptanceHarness {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    clientAcceptanceHarnessImplementation.extendsFrom implementation
+    clientAcceptanceHarnessCompileOnly.extendsFrom compileOnly
+    clientAcceptanceHarnessRuntimeOnly.extendsFrom runtimeOnly
+}
+
+def clientAcceptanceHarnessEnabled = providers
+        .gradleProperty('clientAcceptanceHarness')
+        .map { it.toBoolean() }
+        .getOrElse(false)
+if (clientAcceptanceHarnessEnabled) {
+    ['playerAcceptanceRoot', 'clientAcceptanceHarnessTokenFile',
+     'clientAcceptanceHarnessEndpoint', 'clientAcceptanceHarnessWorld'].each { propertyName ->
+        if (!project.hasProperty(propertyName)) {
+            throw new GradleException("clientAcceptanceHarness requires -P${propertyName}")
+        }
+    }
+    if (project.property('clientAcceptanceHarnessWorld') != 'Steve Agent Mac Acceptance') {
+        throw new GradleException(
+                'clientAcceptanceHarnessWorld must be exactly Steve Agent Mac Acceptance')
+    }
 }
 
 def runtimeProfile = providers.gradleProperty('industrialRuntimeProfile')
@@ -40,6 +69,60 @@ def c03RecoveryReloadAcceptancePhase = providers
 def c04RecoveryReloadAcceptancePhase = providers
         .gradleProperty('c04RecoveryReloadAcceptancePhase')
         .getOrNull()
+def metalPressRecoveryReloadAcceptancePhase = providers
+        .gradleProperty('metalPressRecoveryReloadAcceptancePhase')
+        .getOrNull()
+def metalPressResourceRecoveryReloadPhase = providers
+        .gradleProperty('metalPressResourceRecoveryReloadPhase')
+        .getOrNull()
+def alloySmelterRecoveryReloadAcceptancePhase = providers
+        .gradleProperty('alloySmelterRecoveryReloadAcceptancePhase')
+        .getOrNull()
+def compositePlayerOrderReloadPhase = providers
+        .gradleProperty('compositePlayerOrderReloadPhase')
+        .getOrNull()
+def warehouseRestartPhase = providers
+        .gradleProperty('warehouseRestartPhase')
+        .getOrNull()
+if (warehouseRestartPhase != null && !['write', 'read'].contains(warehouseRestartPhase)) {
+    throw new GradleException("Unsupported warehouseRestartPhase '${warehouseRestartPhase}'.")
+}
+def alloySmelterWarehouseRestartPhase = providers
+        .gradleProperty('alloySmelterWarehouseRestartPhase')
+        .getOrNull()
+if (alloySmelterWarehouseRestartPhase != null
+        && !['write', 'read'].contains(alloySmelterWarehouseRestartPhase)) {
+    throw new GradleException("Unsupported alloySmelterWarehouseRestartPhase "
+            + "'${alloySmelterWarehouseRestartPhase}'.")
+}
+def ipo03ResourceRestartPhase = providers
+        .gradleProperty('ipo03ResourceRestartPhase')
+        .getOrNull()
+if (ipo03ResourceRestartPhase != null && !['write', 'read'].contains(ipo03ResourceRestartPhase)) {
+    throw new GradleException("Unsupported ipo03ResourceRestartPhase "
+            + "'${ipo03ResourceRestartPhase}'.")
+}
+def compositePlayerOrderResumePhase = providers
+        .gradleProperty('compositePlayerOrderResumePhase')
+        .getOrNull()
+if (compositePlayerOrderResumePhase != null
+        && !['write', 'read'].contains(compositePlayerOrderResumePhase)) {
+    throw new GradleException("Unsupported compositePlayerOrderResumePhase "
+            + "'${compositePlayerOrderResumePhase}'. Expected 'write' or 'read'.")
+}
+if (compositePlayerOrderResumePhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'compositePlayerOrderResumePhase and industrialRuntimeProfile cannot be combined')
+}
+if (compositePlayerOrderReloadPhase != null
+        && !['write', 'read'].contains(compositePlayerOrderReloadPhase)) {
+    throw new GradleException("Unsupported compositePlayerOrderReloadPhase "
+            + "'${compositePlayerOrderReloadPhase}'. Expected 'write' or 'read'.")
+}
+if (compositePlayerOrderReloadPhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'compositePlayerOrderReloadPhase and industrialRuntimeProfile cannot be combined')
+}
 if (recoveryReloadAcceptancePhase != null
         && !['write', 'read'].contains(recoveryReloadAcceptancePhase)) {
     throw new GradleException("Unsupported recoveryReloadAcceptancePhase '${recoveryReloadAcceptancePhase}'. "
@@ -55,6 +138,56 @@ if (c04RecoveryReloadAcceptancePhase != null
     throw new GradleException("Unsupported c04RecoveryReloadAcceptancePhase '${c04RecoveryReloadAcceptancePhase}'. "
             + "Expected 'write' or 'read'.")
 }
+if (metalPressRecoveryReloadAcceptancePhase != null
+        && !['write', 'read'].contains(metalPressRecoveryReloadAcceptancePhase)) {
+    throw new GradleException("Unsupported metalPressRecoveryReloadAcceptancePhase "
+            + "'${metalPressRecoveryReloadAcceptancePhase}'. Expected 'write' or 'read'.")
+}
+if (metalPressRecoveryReloadAcceptancePhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'metalPressRecoveryReloadAcceptancePhase and industrialRuntimeProfile cannot be combined')
+}
+def metalPressResourceReloadParts = metalPressResourceRecoveryReloadPhase == null
+        ? [] : metalPressResourceRecoveryReloadPhase.split(':', -1) as List
+def metalPressResourceReloadWindows = [
+        'POWER_VERIFIED',
+        'MAINTENANCE_APPROVED',
+        'MAINTENANCE_PREPARED',
+        'PARTIAL_ENERGY',
+        'ENERGY_SETTLED',
+        'OUTPUT_OBSERVED'
+]
+if (metalPressResourceRecoveryReloadPhase != null
+        && !(metalPressResourceReloadParts.size() in [1, 2]
+        && ['write', 'approve', 'read'].contains(metalPressResourceReloadParts[0])
+        && (metalPressResourceReloadParts.size() == 1
+        || metalPressResourceReloadWindows.contains(metalPressResourceReloadParts[1])))) {
+    throw new GradleException("Unsupported metalPressResourceRecoveryReloadPhase "
+            + "'${metalPressResourceRecoveryReloadPhase}'. Expected write/approve/read optionally "
+            + "followed by one of ${metalPressResourceReloadWindows}.")
+}
+if (metalPressResourceRecoveryReloadPhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'metalPressResourceRecoveryReloadPhase and industrialRuntimeProfile cannot be combined')
+}
+def alloyReloadParts = alloySmelterRecoveryReloadAcceptancePhase == null
+        ? [] : alloySmelterRecoveryReloadAcceptancePhase.split(':', -1) as List
+def alloyReloadWindows = [
+        'WITHDRAWN_NOT_DELIVERED',
+        'BATCH_ADMITTED_NOT_OUTPUT',
+        'OUTPUT_CLAIMED_NOT_REPORTED'
+]
+if (alloySmelterRecoveryReloadAcceptancePhase != null
+        && (alloyReloadParts.size() != 2
+        || !['write', 'read'].contains(alloyReloadParts[0])
+        || !alloyReloadWindows.contains(alloyReloadParts[1]))) {
+    throw new GradleException("Unsupported alloySmelterRecoveryReloadAcceptancePhase "
+            + "'${alloySmelterRecoveryReloadAcceptancePhase}'.")
+}
+if (alloySmelterRecoveryReloadAcceptancePhase != null && runtimeProfile != 'development') {
+    throw new GradleException(
+            'alloySmelterRecoveryReloadAcceptancePhase and industrialRuntimeProfile cannot be combined')
+}
 if (c04RecoveryReloadAcceptancePhase != null && runtimeProfile != 'development') {
     throw new GradleException(
             'c04RecoveryReloadAcceptancePhase and industrialRuntimeProfile cannot be combined')
@@ -68,7 +201,15 @@ if (c04RecoveryReloadAcceptancePhase != null
             'createKineticsAcceptance',
             'createRuntimeRecipeCatalogAcceptance',
             'createProcessingGameTest',
-            'createBeltPressGameTest'
+            'createBeltPressGameTest',
+            'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest',
+            'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'phaseIvIntegratedVisibleGameTest'
         ].any { project.hasProperty(it) })) {
     throw new GradleException(
             'c04RecoveryReloadAcceptancePhase cannot be combined with another acceptance fixture')
@@ -86,7 +227,15 @@ if (c03RecoveryReloadAcceptancePhase != null
             'createKineticsAcceptance',
             'createRuntimeRecipeCatalogAcceptance',
             'createProcessingGameTest',
-            'createBeltPressGameTest'
+            'createBeltPressGameTest',
+            'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest',
+            'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'phaseIvIntegratedVisibleGameTest'
         ].any { project.hasProperty(it) })) {
     throw new GradleException(
             'c03RecoveryReloadAcceptancePhase cannot be combined with another acceptance fixture')
@@ -102,7 +251,15 @@ if (recoveryReloadAcceptancePhase != null
             'createKineticsAcceptance',
             'createRuntimeRecipeCatalogAcceptance',
             'createProcessingGameTest',
-            'createBeltPressGameTest'
+            'createBeltPressGameTest',
+            'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest',
+            'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'phaseIvIntegratedVisibleGameTest'
         ].any { project.hasProperty(it) }) {
     throw new GradleException(
             'recoveryReloadAcceptancePhase cannot be combined with another acceptance fixture')
@@ -133,7 +290,15 @@ if (project.hasProperty('createRuntimeRecipeCatalogAcceptance')
             'createScanAcceptance',
             'createKineticsAcceptance',
             'createProcessingGameTest',
-            'createBeltPressGameTest'
+            'createBeltPressGameTest',
+            'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest',
+            'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'phaseIvIntegratedVisibleGameTest'
         ].any { project.hasProperty(it) }) {
     throw new GradleException(
             'createRuntimeRecipeCatalogAcceptance cannot be combined with another server fixture')
@@ -149,8 +314,134 @@ if (project.hasProperty('createBeltPressGameTest')
         || project.hasProperty('mekanismAbsentSmoke'))) {
     throw new GradleException('createBeltPressGameTest cannot be combined with another acceptance fixture')
 }
+if (project.hasProperty('c06SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c06SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('c06SurvivalPowerGameTest')
+        && [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest',
+            'c07SurvivalPowerGameTest',
+            'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'goalDrivenExecutionGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'factoryDiagnosticGameTest',
+            'phaseIvIntegratedVisibleGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'c06SurvivalPowerGameTest cannot be combined with another acceptance fixture')
+}
+if (project.hasProperty('c07SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c07SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('c08SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c08SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('c09SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c09SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('c10SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c10SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('c10SurvivalPowerGameTest')
+        && [
+            'mekanismAbsentSmoke', 'createScanAcceptance', 'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance', 'createProcessingGameTest',
+            'createBeltPressGameTest', 'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest', 'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest', 'goalDrivenExecutionGameTest',
+            'botFleetGameTest', 'sitePreparationGameTest', 'factoryDiagnosticGameTest',
+            'phaseIvIntegratedVisibleGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'c10SurvivalPowerGameTest cannot be combined with another acceptance fixture')
+}
+if (project.hasProperty('c09SurvivalPowerGameTest')
+        && [
+            'mekanismAbsentSmoke', 'createScanAcceptance', 'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance', 'createProcessingGameTest',
+            'createBeltPressGameTest', 'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest', 'c08SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'goalDrivenExecutionGameTest', 'botFleetGameTest',
+            'sitePreparationGameTest', 'factoryDiagnosticGameTest',
+            'phaseIvIntegratedVisibleGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'c09SurvivalPowerGameTest cannot be combined with another acceptance fixture')
+}
+if (project.hasProperty('c08SurvivalPowerGameTest')
+        && [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest',
+            'c06SurvivalPowerGameTest',
+            'c07SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'goalDrivenExecutionGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'factoryDiagnosticGameTest',
+            'phaseIvIntegratedVisibleGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'c08SurvivalPowerGameTest cannot be combined with another acceptance fixture')
+}
+if (project.hasProperty('c07SurvivalPowerGameTest')
+        && [
+            'mekanismAbsentSmoke',
+            'createScanAcceptance',
+            'createKineticsAcceptance',
+            'createRuntimeRecipeCatalogAcceptance',
+            'createProcessingGameTest',
+            'createBeltPressGameTest',
+            'c06SurvivalPowerGameTest',
+            'c08SurvivalPowerGameTest',
+            'c09SurvivalPowerGameTest',
+            'c10SurvivalPowerGameTest',
+            'goalDrivenExecutionGameTest',
+            'botFleetGameTest',
+            'sitePreparationGameTest',
+            'factoryDiagnosticGameTest',
+            'phaseIvIntegratedVisibleGameTest'
+        ].any { project.hasProperty(it) }) {
+    throw new GradleException(
+            'c07SurvivalPowerGameTest cannot be combined with another acceptance fixture')
+}
 if (project.hasProperty('goalDrivenExecutionGameTest') && runtimeProfile != 'development') {
     throw new GradleException('goalDrivenExecutionGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('botFleetGameTest') && runtimeProfile != 'development') {
+    throw new GradleException('botFleetGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('sitePreparationGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'sitePreparationGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('factoryDiagnosticGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'factoryDiagnosticGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('phaseIvIntegratedVisibleGameTest')
+        && runtimeProfile != 'development') {
+    throw new GradleException(
+            'phaseIvIntegratedVisibleGameTest and industrialRuntimeProfile cannot be combined')
 }
 def selectedAcceptanceFixtures = [
         'mekanismAbsentSmoke',
@@ -159,15 +450,67 @@ def selectedAcceptanceFixtures = [
         'createRuntimeRecipeCatalogAcceptance',
         'createProcessingGameTest',
         'createBeltPressGameTest',
-        'goalDrivenExecutionGameTest'
+        'c04SurvivalPowerGameTest',
+        'c05SurvivalPowerGameTest',
+        'c06SurvivalPowerGameTest',
+        'c07SurvivalPowerGameTest',
+        'c08SurvivalPowerGameTest',
+        'c09SurvivalPowerGameTest',
+        'c10SurvivalPowerGameTest',
+        'goalDrivenExecutionGameTest',
+        'botFleetGameTest',
+        'sitePreparationGameTest',
+        'factoryDiagnosticGameTest',
+        'phaseIvIntegratedVisibleGameTest',
+        'ieAdapterAcceptance',
+        'iePhysicalAcceptance',
+        'compositePlayerOrderAcceptance'
 ].count { project.hasProperty(it) }
+if (project.hasProperty('c04SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c04SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
+if (project.hasProperty('c05SurvivalPowerGameTest') && runtimeProfile != 'development') {
+    throw new GradleException(
+            'c05SurvivalPowerGameTest and industrialRuntimeProfile cannot be combined')
+}
 selectedAcceptanceFixtures += recoveryReloadAcceptancePhase == null ? 0 : 1
 selectedAcceptanceFixtures += c03RecoveryReloadAcceptancePhase == null ? 0 : 1
 selectedAcceptanceFixtures += c04RecoveryReloadAcceptancePhase == null ? 0 : 1
+selectedAcceptanceFixtures += metalPressRecoveryReloadAcceptancePhase == null ? 0 : 1
+selectedAcceptanceFixtures += metalPressResourceRecoveryReloadPhase == null ? 0 : 1
+selectedAcceptanceFixtures += alloySmelterRecoveryReloadAcceptancePhase == null ? 0 : 1
+selectedAcceptanceFixtures += alloySmelterWarehouseRestartPhase == null ? 0 : 1
+selectedAcceptanceFixtures += ipo03ResourceRestartPhase == null ? 0 : 1
 if (selectedAcceptanceFixtures > 1) {
     throw new GradleException('goal-driven and established acceptance fixtures require separate isolated runs')
 }
 def includeCreateRuntime = !runtimeProfile.startsWith('neither-')
+
+// Windows acceptance uses the real launcher root as its explicit forbidden
+// boundary. Other hosts have no PCL2 root, so use an existing repository-
+// ignored sentinel outside every isolated run directory. The runtime guards
+// still canonicalize both paths and fail closed; this only prevents a Windows
+// drive path from becoming an unresolved relative path on Unix-like hosts.
+def windowsHost = System.getProperty('os.name')
+        .toLowerCase(Locale.ROOT)
+        .startsWith('windows')
+def acceptanceForbiddenRoot = windowsHost
+        ? new File('D:/PCL2')
+        : rootProject.file('work/non-windows-formal-root-sentinel')
+def acceptanceForbiddenRootIdentity = acceptanceForbiddenRoot.absolutePath
+tasks.matching { task ->
+    !windowsHost && task.name in ['runClient', 'runServer', 'runGameTestServer']
+}.configureEach {
+    doFirst {
+        if (!acceptanceForbiddenRoot.isDirectory()
+                && !acceptanceForbiddenRoot.mkdirs()) {
+            throw new GradleException(
+                    "Could not create non-Windows forbidden-root sentinel: "
+                            + acceptanceForbiddenRoot)
+        }
+    }
+}
 
 minecraft {
     mappings channel: 'official', version: minecraft_version
@@ -188,6 +531,11 @@ minecraft {
                         source sourceSets.createOnlyClientAcceptance
                     }
                 }
+                if (clientAcceptanceHarnessEnabled) {
+                    steve_acceptance_bridge {
+                        source sourceSets.clientAcceptanceHarness
+                    }
+                }
             }
         }
 
@@ -196,9 +544,212 @@ minecraft {
                 workingDirectory project.file("run/profiles/${runtimeProfile}")
                 property 'steve_industrial.test.runtimeProfile', runtimeProfile
             }
+            // A game directory outside the repository, for player acceptance.
+            //
+            // The runtime refuses to build in a world whose game directory has a git
+            // ancestor (SOURCE_TREE_GAME_DIR_REFUSED), which is deliberate: construction
+            // writes region files, and a source tree is the last place they belong. That
+            // refusal is about where the directory is, not about runClient, so the fix is
+            // to move the directory rather than to weaken the check. The development
+            // client keeps its in-repository default and stays unable to build; this
+            // switch is what a player uses, and it needs no Minecraft licence because
+            // ForgeGradle supplies a development account.
+            if (project.hasProperty('playerAcceptanceRoot')) {
+                def acceptanceRoot = project.file(project.property('playerAcceptanceRoot'))
+                def repositoryRoot = rootProject.projectDir.canonicalFile.toPath()
+                if (acceptanceRoot.canonicalFile.toPath().startsWith(repositoryRoot)) {
+                    throw new GradleException("playerAcceptanceRoot must be outside the "
+                            + "repository, or the runtime will refuse it for the same "
+                            + "reason the default run directory is refused: "
+                            + acceptanceRoot)
+                }
+                workingDirectory acceptanceRoot
+            }
+            if (clientAcceptanceHarnessEnabled) {
+                def acceptanceRoot = project.file(project.property('playerAcceptanceRoot'))
+                        .canonicalFile
+                def endpoint = project.file(project.property('clientAcceptanceHarnessEndpoint'))
+                        .canonicalFile
+                def expectedEndpoint = new File(acceptanceRoot,
+                        '.steve-agent-harness/bridge.json').canonicalFile
+                if (endpoint != expectedEndpoint) {
+                    throw new GradleException('clientAcceptanceHarnessEndpoint must be exactly '
+                            + expectedEndpoint)
+                }
+                def tokenFile = project.file(
+                        project.property('clientAcceptanceHarnessTokenFile')).canonicalFile
+                def expectedTokenFile = new File(acceptanceRoot,
+                        '.steve-agent-harness/bridge-token').canonicalFile
+                if (tokenFile != expectedTokenFile || !tokenFile.isFile()) {
+                    throw new GradleException('clientAcceptanceHarnessTokenFile must be exactly '
+                            + expectedTokenFile)
+                }
+                property 'steve_industrial.acceptance.bridge.enabled', 'true'
+                property 'steve_industrial.acceptance.bridge.tokenFile',
+                        tokenFile.absolutePath
+                property 'steve_industrial.acceptance.bridge.endpoint', endpoint.absolutePath
+                property 'steve_industrial.acceptance.bridge.gameRoot', acceptanceRoot.absolutePath
+                property 'steve_industrial.acceptance.bridge.world',
+                        project.property('clientAcceptanceHarnessWorld')
+                property 'steve_industrial.acceptance.bridge.port',
+                        project.findProperty('clientAcceptanceHarnessPort') ?: '0'
+                // Composite reuses the isolated three-mode executor.  Keep that authority
+                // inside the already authenticated, disposable real-client harness; normal
+                // clients and the production JAR never receive this runtime property.
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                def quickPlayWorld = project.findProperty('clientAcceptanceQuickPlayWorld')
+                if (quickPlayWorld != null && !quickPlayWorld.toString().isBlank()) {
+                    if (quickPlayWorld != project.property('clientAcceptanceHarnessWorld')) {
+                        throw new GradleException('Quick-play world must equal the acceptance world')
+                    }
+                    args '--quickPlaySingleplayer', quickPlayWorld
+                }
+            }
         }
         server {
             args '--nogui'
+            if (project.hasProperty('ieAdapterAcceptance')) {
+                def ieRunDir = project.file('run/ie-v1020-adapter-acceptance')
+                workingDirectory ieRunDir
+                property 'steve_industrial.test.ieAdapterAcceptance', 'true'
+            }
+            if (project.hasProperty('iePhysicalAcceptance')) {
+                def iePhysicalRunDir = project.file('run/ie-v1020-physical-acceptance')
+                workingDirectory iePhysicalRunDir
+                property 'steve_industrial.test.iePhysicalAcceptance', 'true'
+            }
+            // IPO-02: the Composite order gate needs Create only; it starts from the
+            // player service, so it must not share a run directory with any fixture
+            // that seeds its own arena.
+            // The reload gate shares the Composite order's executor gating but keeps its
+            // own run directory, because its two phases must reuse one saved world.
+            if (compositePlayerOrderReloadPhase != null) {
+                def compositeReloadRunDir = project.file('run/composite-player-order-reload')
+                workingDirectory compositeReloadRunDir
+                property 'steve_industrial.test.compositePlayerOrderReloadPhase',
+                        compositePlayerOrderReloadPhase
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir',
+                        compositeReloadRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir', compositeReloadRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            // Resuming needs its own saved world for the same reason the reload gate
+            // does: two phases, one world, and neither may inherit the other's.
+            if (compositePlayerOrderResumePhase != null) {
+                def compositeResumeRunDir = project.file('run/composite-player-order-resume')
+                workingDirectory compositeResumeRunDir
+                property 'steve_industrial.test.compositePlayerOrderResumePhase',
+                        compositePlayerOrderResumePhase
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir',
+                        compositeResumeRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir', compositeResumeRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            // Its own world, because the loop it drives lives across many ticks and a
+            // long-lived test in a shared GameTest arena disturbs its neighbours.
+            // Two phases over one saved world, so the read phase can only use what the
+            // write phase wrote down.
+            if (warehouseRestartPhase != null) {
+                def warehouseRestartRunDir = project.file('run/warehouse-restart')
+                workingDirectory warehouseRestartRunDir
+                property 'steve_industrial.test.warehouseRestartPhase', warehouseRestartPhase
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir',
+                        warehouseRestartRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir',
+                        warehouseRestartRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            if (alloySmelterWarehouseRestartPhase != null) {
+                def alloyWarehouseDir = project.file('run/ie-alloy-warehouse-restart')
+                workingDirectory alloyWarehouseDir
+                property 'steve_industrial.test.alloySmelterWarehouseRestartPhase',
+                        alloySmelterWarehouseRestartPhase
+                property 'steve_industrial.execution.expectedGameDir',
+                        alloyWarehouseDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir',
+                        alloyWarehouseDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            if (ipo03ResourceRestartPhase != null) {
+                def ipo03ResourceDir = project.file('run/ipo03-resource-restart')
+                workingDirectory ipo03ResourceDir
+                property 'steve_industrial.test.ipo03ResourceRestartPhase',
+                        ipo03ResourceRestartPhase
+                property 'steve_industrial.execution.expectedGameDir',
+                        ipo03ResourceDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir',
+                        ipo03ResourceDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            if (project.hasProperty('warehouseUnattended')) {
+                def warehouseRunDir = project.file('run/warehouse-unattended')
+                workingDirectory warehouseRunDir
+                property 'steve_industrial.test.warehouseUnattended', 'true'
+                // The three-mode executor requires its own switches, and an unattended
+                // order runs through exactly the same wrapper a player's does. Without
+                // these the order starts and is refused a tick later, which reads as
+                // "produced nothing" rather than as "not permitted here".
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.bot.expectedGameDir', warehouseRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+                property 'steve_industrial.execution.expectedGameDir', warehouseRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            }
+            // The survey mutates nothing, but it plans, and planning runs the same
+            // isolated-execution path proof an order does. Without these it refuses
+            // every candidate with FORMAL_WORLD_FORBIDDEN and the survey reports a
+            // buildable count of zero that measures the guard rather than the chains.
+            if (project.hasProperty('derivableProductSurvey')) {
+                def surveyRunDir = project.file('run/derivable-product-survey')
+                workingDirectory surveyRunDir
+                property 'steve_industrial.test.derivableProductSurvey', 'true'
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', surveyRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            if (project.hasProperty('compositePlayerOrderAcceptance')) {
+                def compositeOrderRunDir = project.file('run/composite-player-order-acceptance')
+                workingDirectory compositeOrderRunDir
+                property 'steve_industrial.test.compositePlayerOrder', 'true'
+                // The Composite wrapper runs on the three-mode executor and its bot
+                // fleet, both of which refuse to act unless their own isolated-test
+                // switch is on. A player order does not bypass that gate; it runs
+                // inside the same acceptance profile the existing evidence uses.
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir',
+                        compositeOrderRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir', compositeOrderRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+                if (project.hasProperty('compositePlayerOrderModes')) {
+                    property 'steve_industrial.test.compositePlayerOrderModes',
+                            project.property('compositePlayerOrderModes').toString()
+                }
+                if (project.hasProperty('compositePlayerOrderGraphs')) {
+                    property 'steve_industrial.test.compositePlayerOrderGraphs',
+                            project.property('compositePlayerOrderGraphs').toString()
+                }
+            }
             if (project.hasProperty('mekanismAbsentSmoke')) {
                 workingDirectory project.file('run/mekanism-absent')
                 property 'steve_industrial.test.mekanismAbsent', 'true'
@@ -216,7 +767,8 @@ minecraft {
                 workingDirectory runtimeCatalogDir
                 property 'steve_industrial.test.createRuntimeRecipeCatalogAcceptance', 'true'
                 property 'steve_industrial.deployment.expectedGameDir', runtimeCatalogDir.absolutePath
-                property 'steve_industrial.deployment.forbiddenRoot', 'D:/PCL2'
+                property 'steve_industrial.deployment.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
             }
             if (recoveryReloadAcceptancePhase != null) {
                 workingDirectory project.file('run/recovery-reload-acceptance')
@@ -229,7 +781,8 @@ minecraft {
                 property 'steve_industrial.test.c03RecoveryReloadAcceptancePhase',
                         c03RecoveryReloadAcceptancePhase
                 property 'steve_industrial.execution.expectedGameDir', c03RecoveryDir.absolutePath
-                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
             }
             if (c04RecoveryReloadAcceptancePhase != null) {
                 def c04RecoveryDir = project.file('run/c04-recovery-reload-acceptance')
@@ -237,7 +790,37 @@ minecraft {
                 property 'steve_industrial.test.c04RecoveryReloadAcceptancePhase',
                         c04RecoveryReloadAcceptancePhase
                 property 'steve_industrial.execution.expectedGameDir', c04RecoveryDir.absolutePath
-                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            }
+            if (metalPressRecoveryReloadAcceptancePhase != null) {
+                workingDirectory project.file('run/ie-metal-press-recovery-reload-acceptance')
+                property 'steve_industrial.test.metalPressRecoveryReloadAcceptancePhase',
+                        metalPressRecoveryReloadAcceptancePhase
+            }
+            if (metalPressResourceRecoveryReloadPhase != null) {
+                def pressResourceWindow = metalPressResourceReloadParts.size() == 1
+                        ? 'power-verified'
+                        : metalPressResourceReloadParts[1].toLowerCase().replace('_', '-')
+                def pressResourceReloadDir = project.file(
+                        'run/ie-metal-press-resource-recovery-' + pressResourceWindow)
+                workingDirectory pressResourceReloadDir
+                property 'steve_industrial.test.metalPressResourceRecoveryReloadPhase',
+                        metalPressResourceRecoveryReloadPhase
+                property 'steve_industrial.execution.expectedGameDir',
+                        pressResourceReloadDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir',
+                        pressResourceReloadDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot', acceptanceForbiddenRootIdentity
+            }
+            if (alloySmelterRecoveryReloadAcceptancePhase != null) {
+                def alloyReloadDir = project.file('run/ie-alloy-smelter-recovery-'
+                        + alloyReloadParts[1].toLowerCase().replace('_', '-'))
+                workingDirectory alloyReloadDir
+                property 'steve_industrial.test.alloySmelterRecoveryReloadAcceptancePhase',
+                        alloySmelterRecoveryReloadAcceptancePhase
             }
             if (runtimeProfile.endsWith('-server')) {
                 workingDirectory project.file("run/profiles/${runtimeProfile}")
@@ -245,28 +828,190 @@ minecraft {
             }
         }
         gameTestServer {
-            if (project.hasProperty('createProcessingGameTest')) {
+            if (project.hasProperty('phaseIvIntegratedVisibleGameTest')) {
+                def integratedRunDir = project.file('run/phase-iv-integrated-visible-gametest')
+                workingDirectory integratedRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.phaseIvIntegratedVisibleGameTest', 'true'
+                property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', integratedRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.bot.expectedGameDir', integratedRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.sitePrep.expectedGameDir', integratedRunDir.absolutePath
+                property 'steve_industrial.sitePrep.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('createProcessingGameTest')) {
                 def processingRunDir = project.file('run/create-processing-gametest')
                 workingDirectory processingRunDir
                 // The deterministic empty structure is supplied by vanilla under the minecraft namespace.
                 property 'forge.enabledGameTestNamespaces', 'minecraft'
                 property 'steve_industrial.test.createProcessingGameTest', 'true'
                 property 'steve_industrial.execution.expectedGameDir', processingRunDir.absolutePath
-                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
             } else if (project.hasProperty('createBeltPressGameTest')) {
                 def beltRunDir = project.file('run/create-belt-press-gametest')
                 workingDirectory beltRunDir
                 property 'forge.enabledGameTestNamespaces', 'minecraft'
                 property 'steve_industrial.test.createBeltPressGameTest', 'true'
                 property 'steve_industrial.execution.expectedGameDir', beltRunDir.absolutePath
-                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c04SurvivalPowerGameTest')) {
+                def c04SurvivalRunDir = project.file('run/c04-survival-power-gametest')
+                workingDirectory c04SurvivalRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c04SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c04SurvivalRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c05SurvivalPowerGameTest')) {
+                def c05SurvivalRunDir = project.file('run/c05-survival-power-gametest')
+                workingDirectory c05SurvivalRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c05SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c05SurvivalRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot', acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c06SurvivalPowerGameTest')) {
+                def c06RunDir = project.file('run/c06-survival-power-gametest')
+                workingDirectory c06RunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c06SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c06RunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c07SurvivalPowerGameTest')) {
+                def c07RunDir = project.file('run/c07-survival-power-gametest')
+                workingDirectory c07RunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c07SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c07RunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c08SurvivalPowerGameTest')) {
+                def c08RunDir = project.file('run/c08-survival-power-gametest')
+                workingDirectory c08RunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c08SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c08RunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c09SurvivalPowerGameTest')) {
+                def c09RunDir = project.file('run/c09-survival-power-gametest')
+                workingDirectory c09RunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c09SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c09RunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('c10SurvivalPowerGameTest')) {
+                def c10RunDir = project.file('run/c10-survival-power-gametest')
+                workingDirectory c10RunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.c10SurvivalPowerGameTest', 'true'
+                property 'steve_industrial.execution.expectedGameDir', c10RunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
             } else if (project.hasProperty('goalDrivenExecutionGameTest')) {
-                def goalRunDir = project.file('run/goal-driven-execution-gametest')
+                // Crushing wheels grind whatever touches them, arena floor included, and
+                // the debris lands in a neighbour's item lane. Its own world, always.
+                def crushingOnly = project.hasProperty('crushingCapabilityOnly')
+                def c05Only = project.hasProperty('c05CrushingGameTestOnly')
+                def c08HeatedOnly = project.hasProperty('c08HeatedGameTestOnly')
+                def phaseIvCapabilitiesOnly =
+                        project.hasProperty('phaseIvCapabilityGameTestOnly')
+                def phaseIvRecoveryOnly =
+                        project.hasProperty('phaseIvRecoveryGameTestOnly')
+                def phaseIvFaultOnly =
+                        project.hasProperty('phaseIvFaultGameTestOnly')
+                def phaseIvCompositeOnly =
+                        project.hasProperty('phaseIvCompositeGameTestOnly')
+                def phaseIvCompositeFaultOnly =
+                        project.hasProperty('phaseIvCompositeFaultGameTestOnly')
+                def c10OwnedWorkpieceOnly =
+                        project.hasProperty('c10OwnedWorkpieceGameTestOnly')
+                def goalRunDir = project.file(crushingOnly
+                        ? 'run/crushing-capability'
+                        : c05Only
+                        ? 'run/c05-crushing-gametest'
+                        : c08HeatedOnly
+                                ? 'run/c08-heated-gametest'
+                        : c10OwnedWorkpieceOnly
+                                ? 'run/c10-owned-workpiece-gametest'
+                        : phaseIvCapabilitiesOnly
+                                ? 'run/phase-iv-capability-gametest'
+                                : phaseIvRecoveryOnly
+                                        ? 'run/phase-iv-recovery-gametest'
+                                        : phaseIvFaultOnly
+                                                ? 'run/phase-iv-fault-gametest'
+                                                : phaseIvCompositeOnly
+                                                        ? 'run/phase-iv-composite-gametest'
+                                                : phaseIvCompositeFaultOnly
+                                                        ? 'run/phase-iv-composite-fault-gametest'
+                                                : 'run/goal-driven-execution-gametest')
                 workingDirectory goalRunDir
                 property 'forge.enabledGameTestNamespaces', 'minecraft'
                 property 'steve_industrial.test.goalDrivenExecutionGameTest', 'true'
+                if (crushingOnly) {
+                    property 'steve_industrial.test.crushingCapabilityOnly', 'true'
+                }
+                if (c05Only) {
+                    property 'steve_industrial.test.c05CrushingGameTestOnly', 'true'
+                }
+                if (c08HeatedOnly) {
+                    property 'steve_industrial.test.c08HeatedGameTestOnly', 'true'
+                }
+                if (phaseIvCapabilitiesOnly) {
+                    property 'steve_industrial.test.phaseIvCapabilityGameTestOnly', 'true'
+                }
+                if (phaseIvRecoveryOnly) {
+                    property 'steve_industrial.test.phaseIvRecoveryGameTestOnly', 'true'
+                }
+                if (phaseIvFaultOnly) {
+                    property 'steve_industrial.test.phaseIvFaultGameTestOnly', 'true'
+                }
+                if (phaseIvCompositeOnly) {
+                    property 'steve_industrial.test.phaseIvCompositeGameTestOnly', 'true'
+                }
+                if (phaseIvCompositeFaultOnly) {
+                    property 'steve_industrial.test.phaseIvCompositeFaultGameTestOnly', 'true'
+                }
+                if (c10OwnedWorkpieceOnly) {
+                    property 'steve_industrial.test.c10OwnedWorkpieceGameTestOnly', 'true'
+                }
                 property 'steve_industrial.execution.expectedGameDir', goalRunDir.absolutePath
-                property 'steve_industrial.execution.forbiddenRoot', 'D:/PCL2'
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('botFleetGameTest')) {
+                def botRunDir = project.file('run/bot-fleet-gametest')
+                workingDirectory botRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.botFleetGameTest', 'true'
+                property 'steve_industrial.bot.expectedGameDir', botRunDir.absolutePath
+                property 'steve_industrial.bot.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('sitePreparationGameTest')) {
+                def sitePrepRunDir = project.file('run/site-preparation-gametest')
+                workingDirectory sitePrepRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.sitePreparationGameTest', 'true'
+                property 'steve_industrial.sitePrep.expectedGameDir',
+                        sitePrepRunDir.absolutePath
+                property 'steve_industrial.sitePrep.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+                property 'steve_industrial.execution.expectedGameDir',
+                        sitePrepRunDir.absolutePath
+                property 'steve_industrial.execution.forbiddenRoot',
+                        acceptanceForbiddenRootIdentity
+            } else if (project.hasProperty('factoryDiagnosticGameTest')) {
+                def diagnosticRunDir = project.file('run/factory-diagnostic-gametest')
+                workingDirectory diagnosticRunDir
+                property 'forge.enabledGameTestNamespaces', 'minecraft'
+                property 'steve_industrial.test.factoryDiagnosticGameTest', 'true'
             } else {
                 property 'forge.enabledGameTestNamespaces', mod_id
             }
@@ -280,6 +1025,7 @@ repositories {
     maven { url = 'https://maven.createmod.net' }
     maven { url = 'https://maven.ithundxr.dev/mirror' }
     maven { url = 'https://raw.githubusercontent.com/Fuzss/modresources/main/maven/' }
+    maven { url = 'https://www.cursemaven.com' }
 }
 
 dependencies {
@@ -300,6 +1046,22 @@ dependencies {
     compileOnly fg.deobf("dev.engine-room.flywheel:flywheel-forge-api-${minecraft_version}:${flywheel_version}")
     compileOnly fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
     compileOnly annotationProcessor("io.github.llamalad7:mixinextras-common:${mixin_extras_version}")
+    // Final official IE 1.20.1 build. Kept optional and unbundled; versioned internals live in
+    // adapter/immersiveengineering/internal/v1020 only.
+    compileOnly fg.deobf("curse.maven:immersive-engineering-231951:${immersive_engineering_curse_file}")
+
+    // The dedicated IE acceptance switch is self-contained: it must not be possible to
+    // compile the fixture and then accidentally launch it without IE on the runtime path.
+    if (project.hasProperty('ieAdapterAcceptance')
+            || project.hasProperty('iePhysicalAcceptance')
+            || metalPressResourceRecoveryReloadPhase != null
+            || alloySmelterRecoveryReloadAcceptancePhase != null
+            || alloySmelterWarehouseRestartPhase != null
+            || ipo03ResourceRestartPhase != null
+            || providers.gradleProperty('includeImmersiveEngineeringRuntime')
+                    .map { it.toBoolean() }.getOrElse(false)) {
+        runtimeOnly fg.deobf("curse.maven:immersive-engineering-231951:${immersive_engineering_curse_file}")
+    }
 
     if (includeCreateRuntime) {
         runtimeOnly(fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}:slim")) {
@@ -367,4 +1129,187 @@ tasks.named('jar', Jar).configure {
 tasks.named('sourcesJar', Jar).configure {
     from project(':core').sourceSets.main.allSource
     from project(':adapter-api').sourceSets.main.allSource
+}
+
+tasks.matching { it.name == 'runServer' }.configureEach {
+    def ieAcceptanceStartedAt = [millis: 0L]
+    def iePhysicalAcceptanceStartedAt = [millis: 0L]
+    def metalPressReloadStartedAt = [millis: 0L]
+    def metalPressResourceReloadStartedAt = [millis: 0L]
+    def alloyReloadStartedAt = [millis: 0L]
+    def alloyWarehouseRestartStartedAt = [millis: 0L]
+    doFirst {
+        if (project.hasProperty('ieAdapterAcceptance')) {
+            def eula = project.file('run/ie-v1020-adapter-acceptance/eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+            ieAcceptanceStartedAt.millis = System.currentTimeMillis()
+        }
+        if (project.hasProperty('iePhysicalAcceptance')) {
+            def eula = project.file('run/ie-v1020-physical-acceptance/eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+            iePhysicalAcceptanceStartedAt.millis = System.currentTimeMillis()
+        }
+        if (metalPressRecoveryReloadAcceptancePhase != null) {
+            def eula = project.file('run/ie-metal-press-recovery-reload-acceptance/eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+            metalPressReloadStartedAt.millis = System.currentTimeMillis()
+        }
+        if (metalPressResourceRecoveryReloadPhase != null) {
+            def pressResourceWindow = metalPressResourceReloadParts.size() == 1
+                    ? 'power-verified'
+                    : metalPressResourceReloadParts[1].toLowerCase().replace('_', '-')
+            def eula = project.file(
+                    'run/ie-metal-press-resource-recovery-' + pressResourceWindow + '/eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+            metalPressResourceReloadStartedAt.millis = System.currentTimeMillis()
+        }
+        if (alloySmelterRecoveryReloadAcceptancePhase != null) {
+            def runDir = project.file('run/ie-alloy-smelter-recovery-'
+                    + alloyReloadParts[1].toLowerCase().replace('_', '-'))
+            def eula = new File(runDir, 'eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+            alloyReloadStartedAt.millis = System.currentTimeMillis()
+        }
+        if (alloySmelterWarehouseRestartPhase != null) {
+            def eula = project.file('run/ie-alloy-warehouse-restart/eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+            alloyWarehouseRestartStartedAt.millis = System.currentTimeMillis()
+        }
+        if (ipo03ResourceRestartPhase != null) {
+            def eula = project.file('run/ipo03-resource-restart/eula.txt')
+            eula.parentFile.mkdirs()
+            eula.setText('eula=true\n', 'UTF-8')
+        }
+    }
+    doLast {
+        if (project.hasProperty('ieAdapterAcceptance')) {
+            def runDir = project.file('run/ie-v1020-adapter-acceptance')
+            def latestLog = new File(runDir, 'logs/latest.log')
+            def passMarker = 'IE_V1020_ADAPTER_ACCEPTANCE PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException(
+                        "IE adapter acceptance did not emit '${passMarker}' in ${latestLog}")
+            }
+            def newCrashes = fileTree(new File(runDir, 'crash-reports')).matching {
+                include '*.txt'
+            }.files.findAll { it.lastModified() >= ieAcceptanceStartedAt.millis }
+            if (!newCrashes.isEmpty()) {
+                throw new GradleException(
+                        "IE adapter acceptance created crash report(s): ${newCrashes}")
+            }
+        }
+        if (project.hasProperty('iePhysicalAcceptance')) {
+            def runDir = project.file('run/ie-v1020-physical-acceptance')
+            def latestLog = new File(runDir, 'logs/latest.log')
+            def passMarker = 'IE_V1020_PHYSICAL_ACCEPTANCE PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException(
+                        "IE physical acceptance did not emit '${passMarker}' in ${latestLog}")
+            }
+            def newCrashes = fileTree(new File(runDir, 'crash-reports')).matching {
+                include '*.txt'
+            }.files.findAll { it.lastModified() >= iePhysicalAcceptanceStartedAt.millis }
+            if (!newCrashes.isEmpty()) {
+                throw new GradleException(
+                        "IE physical acceptance created crash report(s): ${newCrashes}")
+            }
+        }
+        if (metalPressRecoveryReloadAcceptancePhase != null) {
+            def runDir = project.file('run/ie-metal-press-recovery-reload-acceptance')
+            def latestLog = new File(runDir, 'logs/latest.log')
+            def passMarker = metalPressRecoveryReloadAcceptancePhase == 'write'
+                    ? 'IE_METAL_PRESS_RECOVERY_RELOAD_WRITE PASS'
+                    : 'IE_METAL_PRESS_RECOVERY_RELOAD_ACCEPTANCE PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException(
+                        "IE Metal Press reload acceptance did not emit '${passMarker}' in ${latestLog}")
+            }
+            def newCrashes = fileTree(new File(runDir, 'crash-reports')).matching {
+                include '*.txt'
+            }.files.findAll { it.lastModified() >= metalPressReloadStartedAt.millis }
+            if (!newCrashes.isEmpty()) {
+                throw new GradleException(
+                        "IE Metal Press reload acceptance created crash report(s): ${newCrashes}")
+            }
+        }
+        if (metalPressResourceRecoveryReloadPhase != null) {
+            def pressResourceWindow = metalPressResourceReloadParts.size() == 1
+                    ? 'power-verified'
+                    : metalPressResourceReloadParts[1].toLowerCase().replace('_', '-')
+            def runDir = project.file('run/ie-metal-press-resource-recovery-'
+                    + pressResourceWindow)
+            def latestLog = new File(runDir, 'logs/latest.log')
+            def passMarker = metalPressResourceReloadParts[0] == 'write'
+                    ? 'IE_METAL_PRESS_RESOURCE_RELOAD_WRITE PASS'
+                    : metalPressResourceReloadParts[0] == 'approve'
+                            ? 'IE_METAL_PRESS_MAINTENANCE_RELOAD_APPROVE PASS'
+                            : 'IE_METAL_PRESS_RESOURCE_RELOAD_ACCEPTANCE PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException("IE Metal Press resource reload did not emit "
+                        + "'${passMarker}' in ${latestLog}")
+            }
+            def newCrashes = fileTree(new File(runDir, 'crash-reports')).matching {
+                include '*.txt'
+            }.files.findAll {
+                it.lastModified() >= metalPressResourceReloadStartedAt.millis
+            }
+            if (!newCrashes.isEmpty()) {
+                throw new GradleException(
+                        "IE Metal Press resource reload created crash report(s): ${newCrashes}")
+            }
+        }
+        if (alloySmelterRecoveryReloadAcceptancePhase != null) {
+            def runDir = project.file('run/ie-alloy-smelter-recovery-'
+                    + alloyReloadParts[1].toLowerCase().replace('_', '-'))
+            def latestLog = new File(runDir, 'logs/latest.log')
+            def passMarker = alloyReloadParts[0] == 'write'
+                    ? 'IE_ALLOY_RECOVERY_RELOAD_WRITE PASS'
+                    : 'IE_ALLOY_RECOVERY_RELOAD_ACCEPTANCE PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException(
+                        "IE Alloy reload acceptance did not emit '${passMarker}' in ${latestLog}")
+            }
+            def newCrashes = fileTree(new File(runDir, 'crash-reports')).matching {
+                include '*.txt'
+            }.files.findAll { it.lastModified() >= alloyReloadStartedAt.millis }
+            if (!newCrashes.isEmpty()) {
+                throw new GradleException(
+                        "IE Alloy reload acceptance created crash report(s): ${newCrashes}")
+            }
+        }
+        if (alloySmelterWarehouseRestartPhase != null) {
+            def runDir = project.file('run/ie-alloy-warehouse-restart')
+            def latestLog = new File(runDir, 'logs/latest.log')
+            def passMarker = alloySmelterWarehouseRestartPhase == 'write'
+                    ? 'IE_ALLOY_WAREHOUSE_RESTART_WRITE PASS'
+                    : 'IE_ALLOY_WAREHOUSE_RESTART_READ PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException("IE Alloy warehouse restart did not emit "
+                        + "'${passMarker}' in ${latestLog}")
+            }
+            def newCrashes = fileTree(new File(runDir, 'crash-reports')).matching {
+                include '*.txt'
+            }.files.findAll { it.lastModified() >= alloyWarehouseRestartStartedAt.millis }
+            if (!newCrashes.isEmpty()) {
+                throw new GradleException(
+                        "IE Alloy warehouse restart created crash report(s): ${newCrashes}")
+            }
+        }
+        if (ipo03ResourceRestartPhase != null) {
+            def latestLog = project.file('run/ipo03-resource-restart/logs/latest.log')
+            def passMarker = ipo03ResourceRestartPhase == 'write'
+                    ? 'IPO03_RESOURCE_RESTART_WRITE PASS'
+                    : 'IPO03_RESOURCE_RESTART_READ PASS'
+            if (!latestLog.isFile() || !latestLog.getText('UTF-8').contains(passMarker)) {
+                throw new GradleException("IPO-03 resource restart did not emit "
+                        + "'${passMarker}' in ${latestLog}")
+            }
+        }
+    }
 }

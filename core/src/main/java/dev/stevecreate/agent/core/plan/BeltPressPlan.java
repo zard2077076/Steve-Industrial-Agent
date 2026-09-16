@@ -17,17 +17,20 @@ import java.util.Set;
  * are deterministic; callers supply only a typed origin.
  */
 public final class BeltPressPlan {
-    public static final int MAX_BUILD_STEPS = 12;
-    public static final int MAX_FINAL_PLACEMENTS = 16;
-    public static final int MAX_PREFLIGHT_POSITIONS = 256;
+    public static final int MAX_BUILD_STEPS = 32;
+    public static final int MAX_FINAL_PLACEMENTS = 32;
+    public static final int MAX_PREFLIGHT_POSITIONS = 512;
 
     private static final ResourceId SHAFT = id("create:shaft");
-    private static final ResourceId CREATIVE_MOTOR = id("create:creative_motor");
+    private static final ResourceId STONE = id("minecraft:stone");
+    private static final ResourceId WATER_WHEEL = id("create:water_wheel");
+    private static final ResourceId GEARBOX = id("create:gearbox");
     private static final ResourceId MECHANICAL_PRESS = id("create:mechanical_press");
     private static final ResourceId BELT = id("create:belt");
     private static final ResourceId BELT_CONNECTOR = id("create:belt_connector");
     private static final ResourceId ANDESITE_FUNNEL = id("create:andesite_funnel");
     private static final ResourceId CHEST = id("minecraft:chest");
+    private static final ResourceId WATER = id("minecraft:water");
 
     private static final PressingProcessSpec PROCESS = new PressingProcessSpec(
             id("create:pressing/iron_ingot"),
@@ -114,6 +117,36 @@ public final class BeltPressPlan {
         return process;
     }
 
+    /**
+     * The pilot flow cells this plan owns: one directly below each water source.
+     *
+     * <p>The survival-power topology feeds each water wheel from a source block, and the
+     * build handler writes one flowing-water cell beneath each source to start the flow.
+     * Those cells are journalled — the world really changed there — but they are not
+     * placements: nothing bills them and recovery must not replay them.
+     *
+     * <p>Defined here because three callers need the same answer: the handler that writes
+     * them, the recovery adapter that decides which positions a rescan may cover, and the
+     * acceptance fixture that asserts the BUILD boundary. It used to be spelled out
+     * separately in each, so the recovery adapter kept accepting only the placements and
+     * refused every checkpoint the water topology produced.</p>
+     */
+    public List<BlockPos3i> pilotFlowCells() {
+        return finalPlacements.stream()
+                .filter(placement -> placement.role() == BeltPressRole.BELT_WATER_SOURCE
+                        || placement.role() == BeltPressRole.PRESS_WATER_SOURCE)
+                .map(placement -> placement.position().translate(0, -1, 0))
+                .toList();
+    }
+
+    /** Every position this plan may touch: its placements and its pilot flow cells. */
+    public List<BlockPos3i> ownedPositions() {
+        List<BlockPos3i> owned = new java.util.ArrayList<>(
+                finalPlacements.stream().map(BeltPressPlacement::position).toList());
+        owned.addAll(pilotFlowCells());
+        return List.copyOf(owned);
+    }
+
     public BeltPressPlacement placement(BeltPressRole role) {
         Objects.requireNonNull(role, "role");
         return finalPlacements.stream()
@@ -132,46 +165,98 @@ public final class BeltPressPlan {
 
     private static List<BeltPressBuildStep> resolveBuildSteps(PlanTransform transform) {
         return List.of(
-                place(1, BeltPressBuildRole.BELT_START_PULLEY_SHAFT, SHAFT, transform, 0, 1, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.NONE),
-                place(2, BeltPressBuildRole.BELT_END_PULLEY_SHAFT, SHAFT, transform, 2, 1, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.NONE),
-                place(3, BeltPressBuildRole.BELT_DRIVE, CREATIVE_MOTOR, transform, 0, 1, 1,
-                        PlanBlockAxis.Z, PlanBlockFacing.NORTH),
-                place(4, BeltPressBuildRole.PRESS_DRIVE, CREATIVE_MOTOR, transform, 1, 3, 1,
-                        PlanBlockAxis.Z, PlanBlockFacing.NORTH),
-                place(5, BeltPressBuildRole.MECHANICAL_PRESS, MECHANICAL_PRESS, transform, 1, 3, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.NORTH),
-                place(6, BeltPressBuildRole.OUTPUT_CHEST, CHEST, transform, 3, 0, 0,
+                place(1, BeltPressBuildRole.BELT_FLOW_FLOOR, STONE, transform, -2, 2, 1,
                         PlanBlockAxis.NONE, PlanBlockFacing.NONE),
-                place(7, BeltPressBuildRole.OUTPUT_FUNNEL, ANDESITE_FUNNEL, transform, 3, 1, 0,
+                place(2, BeltPressBuildRole.BELT_FLOW_OUTER_FLOOR, STONE, transform, 0, 2, 1,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(3, BeltPressBuildRole.BELT_FLOW_OUTER_WEST_WALL, STONE, transform, -1, 2, 0,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(4, BeltPressBuildRole.BELT_FLOW_OUTER_EAST_WALL, STONE, transform, -1, 2, 2,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(5, BeltPressBuildRole.BELT_FLOW_NORTH_WALL, STONE, transform, -1, 0, 1,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(6, BeltPressBuildRole.BELT_BASE_START, STONE, transform, 0, 0, 0,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(7, BeltPressBuildRole.BELT_BASE_PRESSING, STONE, transform, 1, 0, 0,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(8, BeltPressBuildRole.BELT_BASE_END, STONE, transform, 2, 0, 0,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(9, BeltPressBuildRole.PRESS_FLOW_FLOOR, STONE, transform, -1, 4, 1,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(10, BeltPressBuildRole.PRESS_FLOW_OUTER_FLOOR, STONE, transform, 1, 4, 1,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(11, BeltPressBuildRole.PRESS_FLOW_EAST_WALL, STONE, transform, 0, 4, 0,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(12, BeltPressBuildRole.PRESS_FLOW_NORTH_WALL, STONE, transform, 0, 4, 2,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(13, BeltPressBuildRole.BELT_WATER_WHEEL, WATER_WHEEL, transform, -1, 1, 2,
+                        PlanBlockAxis.X, PlanBlockFacing.NONE),
+                place(14, BeltPressBuildRole.BELT_GEARBOX, GEARBOX, transform, 0, 1, 2,
+                        PlanBlockAxis.Y, PlanBlockFacing.NONE),
+                place(15, BeltPressBuildRole.BELT_DRIVE_SHAFT, SHAFT, transform, 0, 1, 1,
+                        PlanBlockAxis.Z, PlanBlockFacing.NONE),
+                place(16, BeltPressBuildRole.PRESS_WATER_WHEEL, WATER_WHEEL, transform, 0, 3, 2,
+                        PlanBlockAxis.X, PlanBlockFacing.NONE),
+                place(17, BeltPressBuildRole.PRESS_GEARBOX, GEARBOX, transform, 1, 3, 2,
+                        PlanBlockAxis.Y, PlanBlockFacing.NONE),
+                place(18, BeltPressBuildRole.PRESS_DRIVE_SHAFT, SHAFT, transform, 1, 3, 1,
+                        PlanBlockAxis.Z, PlanBlockFacing.NONE),
+                place(19, BeltPressBuildRole.BELT_START_PULLEY_SHAFT, SHAFT, transform, 2, 1, 0,
+                        PlanBlockAxis.Z, PlanBlockFacing.NONE),
+                place(20, BeltPressBuildRole.BELT_END_PULLEY_SHAFT, SHAFT, transform, 0, 1, 0,
+                        PlanBlockAxis.Z, PlanBlockFacing.NONE),
+                place(21, BeltPressBuildRole.MECHANICAL_PRESS, MECHANICAL_PRESS, transform, 1, 3, 0,
+                        PlanBlockAxis.Z, PlanBlockFacing.NORTH),
+                place(22, BeltPressBuildRole.OUTPUT_CHEST, CHEST, transform, -1, 0, 0,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(23, BeltPressBuildRole.OUTPUT_FUNNEL, ANDESITE_FUNNEL, transform, -1, 1, 0,
                         PlanBlockAxis.NONE, PlanBlockFacing.UP),
+                place(24, BeltPressBuildRole.BELT_WATER_SOURCE, WATER, transform, -1, 2, 1,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                place(25, BeltPressBuildRole.PRESS_WATER_SOURCE, WATER, transform, 0, 4, 1,
+                        PlanBlockAxis.NONE, PlanBlockFacing.NONE),
                 new BeltPressBuildStep.ConnectBelt(
-                        8,
+                        26,
                         BELT_CONNECTOR,
-                        transform.resolve(new BlockPos3i(0, 1, 0)),
                         transform.resolve(new BlockPos3i(2, 1, 0)),
+                        transform.resolve(new BlockPos3i(0, 1, 0)),
                         3));
     }
 
     private static List<BeltPressPlacement> resolveFinalPlacements(PlanTransform transform) {
         return List.of(
-                placement(1, BeltPressRole.BELT_DRIVE, CREATIVE_MOTOR, transform, 0, 1, 1,
+                placement(1, BeltPressRole.BELT_FLOW_FLOOR, STONE, transform, -2, 2, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(2, BeltPressRole.BELT_FLOW_OUTER_FLOOR, STONE, transform, 0, 2, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(3, BeltPressRole.BELT_FLOW_OUTER_WEST_WALL, STONE, transform, -1, 2, 0, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(4, BeltPressRole.BELT_FLOW_OUTER_EAST_WALL, STONE, transform, -1, 2, 2, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(5, BeltPressRole.BELT_FLOW_NORTH_WALL, STONE, transform, -1, 0, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(6, BeltPressRole.BELT_BASE_START, STONE, transform, 0, 0, 0, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(7, BeltPressRole.BELT_BASE_PRESSING, STONE, transform, 1, 0, 0, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(8, BeltPressRole.BELT_BASE_END, STONE, transform, 2, 0, 0, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(9, BeltPressRole.PRESS_FLOW_FLOOR, STONE, transform, -1, 4, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(10, BeltPressRole.PRESS_FLOW_OUTER_FLOOR, STONE, transform, 1, 4, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(11, BeltPressRole.PRESS_FLOW_EAST_WALL, STONE, transform, 0, 4, 0, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(12, BeltPressRole.PRESS_FLOW_NORTH_WALL, STONE, transform, 0, 4, 2, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(13, BeltPressRole.BELT_WATER_WHEEL, WATER_WHEEL, transform, -1, 1, 2, PlanBlockAxis.X, PlanBlockFacing.NONE),
+                placement(14, BeltPressRole.BELT_GEARBOX, GEARBOX, transform, 0, 1, 2, PlanBlockAxis.Y, PlanBlockFacing.NONE),
+                placement(15, BeltPressRole.BELT_DRIVE_SHAFT, SHAFT, transform, 0, 1, 1, PlanBlockAxis.Z, PlanBlockFacing.NONE),
+                placement(16, BeltPressRole.PRESS_WATER_WHEEL, WATER_WHEEL, transform, 0, 3, 2, PlanBlockAxis.X, PlanBlockFacing.NONE),
+                placement(17, BeltPressRole.PRESS_GEARBOX, GEARBOX, transform, 1, 3, 2, PlanBlockAxis.Y, PlanBlockFacing.NONE),
+                placement(18, BeltPressRole.PRESS_DRIVE_SHAFT, SHAFT, transform, 1, 3, 1, PlanBlockAxis.Z, PlanBlockFacing.NONE),
+                placement(19, BeltPressRole.MECHANICAL_PRESS, MECHANICAL_PRESS, transform, 1, 3, 0,
                         PlanBlockAxis.Z, PlanBlockFacing.NORTH),
-                placement(2, BeltPressRole.PRESS_DRIVE, CREATIVE_MOTOR, transform, 1, 3, 1,
-                        PlanBlockAxis.Z, PlanBlockFacing.NORTH),
-                placement(3, BeltPressRole.MECHANICAL_PRESS, MECHANICAL_PRESS, transform, 1, 3, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.NORTH),
-                placement(4, BeltPressRole.OUTPUT_CHEST, CHEST, transform, 3, 0, 0,
+                placement(20, BeltPressRole.OUTPUT_CHEST, CHEST, transform, -1, 0, 0,
                         PlanBlockAxis.NONE, PlanBlockFacing.NONE),
-                placement(5, BeltPressRole.OUTPUT_FUNNEL, ANDESITE_FUNNEL, transform, 3, 1, 0,
+                placement(21, BeltPressRole.OUTPUT_FUNNEL, ANDESITE_FUNNEL, transform, -1, 1, 0,
                         PlanBlockAxis.NONE, PlanBlockFacing.UP),
-                placement(6, BeltPressRole.BELT_START, BELT, transform, 0, 1, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.EAST),
-                placement(7, BeltPressRole.BELT_PRESSING, BELT, transform, 1, 1, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.EAST),
-                placement(8, BeltPressRole.BELT_END, BELT, transform, 2, 1, 0,
-                        PlanBlockAxis.Z, PlanBlockFacing.EAST));
+                placement(22, BeltPressRole.BELT_WATER_SOURCE, WATER, transform, -1, 2, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(23, BeltPressRole.PRESS_WATER_SOURCE, WATER, transform, 0, 4, 1, PlanBlockAxis.NONE, PlanBlockFacing.NONE),
+                placement(24, BeltPressRole.BELT_START, BELT, transform, 2, 1, 0,
+                        PlanBlockAxis.Z, PlanBlockFacing.WEST),
+                placement(25, BeltPressRole.BELT_PRESSING, BELT, transform, 1, 1, 0,
+                        PlanBlockAxis.Z, PlanBlockFacing.WEST),
+                placement(26, BeltPressRole.BELT_END, BELT, transform, 0, 1, 0,
+                        PlanBlockAxis.Z, PlanBlockFacing.WEST));
     }
 
     private void validateResolvedPlan() {
@@ -219,12 +304,12 @@ public final class BeltPressPlan {
         }
     }
 
-    /** Fixed 6 x 5 x 5 volume checked without loading chunks before execution. */
+    /** Fixed 8 x 6 x 7 volume checked without loading chunks before execution. */
     private static List<BlockPos3i> resolvePreflightPositions(PlanTransform transform) {
-        List<BlockPos3i> positions = new ArrayList<>(150);
-        for (int x = -1; x <= 4; x++) {
-            for (int y = 0; y <= 4; y++) {
-                for (int z = -2; z <= 2; z++) {
+        List<BlockPos3i> positions = new ArrayList<>(336);
+        for (int x = -3; x <= 4; x++) {
+            for (int y = 0; y <= 5; y++) {
+                for (int z = -2; z <= 4; z++) {
                     positions.add(transform.resolve(new BlockPos3i(x, y, z)));
                 }
             }

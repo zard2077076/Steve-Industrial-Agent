@@ -1,0 +1,13 @@
+package dev.stevecreate.agent.core.siteprep;
+
+public enum TerrainPreparationTaskKind {
+    RESERVE_CLEARANCE_POSITIONS,
+    REMOVE_SAFE_FOLIAGE,
+    MINE_AUTHORIZED_BLOCK,
+    COLLECT_DROPS,
+    DELIVER_SALVAGE,
+    FILL_MINOR_HOLE,
+    LEVEL_SURFACE,
+    VERIFY_GROUND,
+    RELEASE_CLEARANCE_POSITIONS
+}

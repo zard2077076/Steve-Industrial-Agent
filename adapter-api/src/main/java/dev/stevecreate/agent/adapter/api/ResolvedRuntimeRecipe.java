@@ -21,6 +21,11 @@ public record ResolvedRuntimeRecipe(
             throw new IllegalArgumentException(
                     "Resolved recipe identity, type and source must match its runtime entry");
         }
+        if (!runtimeEntry.heatRequirement().sourceRecipeId()
+                .equals(resolvedRecipe.recipeId())) {
+            throw new IllegalArgumentException(
+                    "Resolved recipe lost its runtime heat metadata provenance");
+        }
         Objects.requireNonNull(selections, "selections");
         if (selections.size() != runtimeEntry.inputs().size()) {
             throw new IllegalArgumentException("Every runtime input requires exactly one selection");

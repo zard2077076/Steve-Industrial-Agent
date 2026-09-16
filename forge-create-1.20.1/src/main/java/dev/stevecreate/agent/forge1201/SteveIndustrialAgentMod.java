@@ -14,6 +14,15 @@ import dev.stevecreate.agent.forge1201.acceptance.CreateKineticsAcceptanceFixtur
 import dev.stevecreate.agent.forge1201.acceptance.CreateRuntimeRecipeCatalogAcceptanceFixture;
 import dev.stevecreate.agent.forge1201.acceptance.C03RecoveryReloadAcceptanceFixture;
 import dev.stevecreate.agent.forge1201.acceptance.C04RecoveryReloadAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.ImmersiveEngineeringV1020AdapterAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.CompositePlayerOrderAcceptanceRunner;
+import dev.stevecreate.agent.forge1201.acceptance.CompositeReloadAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.CompositeResumeAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.WarehouseRestartAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.WarehouseUnattendedAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.DerivableProductSurveyFixture;
+import dev.stevecreate.agent.forge1201.acceptance.ImmersiveEngineeringV1020PhysicalAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.MetalPressRecoveryReloadAcceptanceFixture;
 import dev.stevecreate.agent.forge1201.acceptance.RecoveryReloadAcceptanceFixture;
 import dev.stevecreate.agent.forge1201.adapter.ForgeRegistryIndustrialAdapter;
 import dev.stevecreate.agent.forge1201.adapter.create.ForgeCreateRuntimeRecipeCatalogs;
@@ -23,10 +32,28 @@ import dev.stevecreate.agent.forge1201.command.CreateRuntimeBindingCommand;
 import dev.stevecreate.agent.forge1201.command.CreateDeploymentDryRunCommand;
 import dev.stevecreate.agent.forge1201.command.PilotDeploymentCommand;
 import dev.stevecreate.agent.forge1201.command.PilotRegionCommand;
+import dev.stevecreate.agent.forge1201.command.SitePreparationCommand;
 import dev.stevecreate.agent.forge1201.command.SetupCommand;
 import dev.stevecreate.agent.forge1201.command.BackupCommand;
 import dev.stevecreate.agent.forge1201.command.PublicRuntimeAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.entity.ConstructionBotEntities;
+import dev.stevecreate.agent.forge1201.player.PlayerWorkflowItems;
+import dev.stevecreate.agent.forge1201.player.net.PlayerWorkflowNetwork;
+import dev.stevecreate.agent.forge1201.command.PlayerRelocationService;
+import dev.stevecreate.agent.forge1201.command.PlayerClearingService;
+import dev.stevecreate.agent.forge1201.command.PlayerConstructionService;
+import dev.stevecreate.agent.forge1201.command.MetalPressProductionService;
+import dev.stevecreate.agent.forge1201.command.MetalPressResourceRecoveryReloadAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.command.AlloySmelterProductionService;
+import dev.stevecreate.agent.forge1201.command.AlloySmelterRecoveryReloadAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.AlloySmelterWarehouseRestartAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.acceptance.IndustrialResourceRestartAcceptanceFixture;
+import dev.stevecreate.agent.forge1201.command.PlayerCompositeOrderService;
+import dev.stevecreate.agent.forge1201.player.net.MetalPressOrderNetwork;
+import dev.stevecreate.agent.forge1201.player.net.CompositeOrderNetwork;
 import dev.stevecreate.agent.forge1201.runtime.PublicAlphaConfig;
+import dev.stevecreate.agent.forge1201.warehouse.WarehouseOrderService;
+import dev.stevecreate.agent.forge1201.industrial.IndustrialPlayerOrderService;
 import dev.stevecreate.agent.forge1201.profile.DeceasedCraftPackProfileProbe;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,10 +73,12 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
@@ -86,8 +115,13 @@ public final class SteveIndustrialAgentMod {
                     "create", ExpectedAdapterOutcome.SUCCESS,
                     "mekanism", ExpectedAdapterOutcome.UNSUPPORTED_RUNTIME));
 
-    public SteveIndustrialAgentMod() {
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, PublicAlphaConfig.SPEC,
+    public SteveIndustrialAgentMod(FMLJavaModLoadingContext loadingContext) {
+        ConstructionBotEntities.register(loadingContext.getModEventBus());
+        PlayerWorkflowItems.register(loadingContext.getModEventBus());
+        PlayerWorkflowNetwork.register();
+        MetalPressOrderNetwork.register();
+        CompositeOrderNetwork.register();
+        loadingContext.registerConfig(ModConfig.Type.COMMON, PublicAlphaConfig.SPEC,
                 "steve-industrial-agent-common.toml");
     }
 
@@ -226,6 +260,31 @@ public final class SteveIndustrialAgentMod {
         }
     }
 
+    /** Runs only the optional read-only IE 10.2.0 adapter acceptance profile. */
+    @SubscribeEvent
+    public static void verifyImmersiveEngineeringAdapterAcceptance(ServerStartedEvent event) {
+        if (Boolean.getBoolean(ImmersiveEngineeringV1020AdapterAcceptanceFixture.ENABLE_PROPERTY)) {
+            ImmersiveEngineeringV1020AdapterAcceptanceFixture.run(event.getServer(), LOGGER);
+        }
+    }
+
+    /** Starts only the disposable IE 10.2.0 real Metal Press lifecycle fixture. */
+    @SubscribeEvent
+    public static void verifyImmersiveEngineeringPhysicalAcceptance(ServerStartedEvent event) {
+        if (Boolean.getBoolean(
+                ImmersiveEngineeringV1020PhysicalAcceptanceFixture.ENABLE_PROPERTY)) {
+            ImmersiveEngineeringV1020PhysicalAcceptanceFixture.start(event.getServer(), LOGGER);
+        }
+    }
+
+    /** Starts only the disposable IPO-02 Composite player-order gate. */
+    @SubscribeEvent
+    public static void verifyCompositePlayerOrderAcceptance(ServerStartedEvent event) {
+        if (Boolean.getBoolean(CompositePlayerOrderAcceptanceRunner.ENABLE_PROPERTY)) {
+            CompositePlayerOrderAcceptanceRunner.start(event.getServer(), LOGGER);
+        }
+    }
+
     /** Starts only the clean production JAR inside the path- and marker-validated R-09 profile. */
     @SubscribeEvent
     public static void verifyDeceasedCraftPackProfile(ServerStartedEvent event) {
@@ -240,6 +299,37 @@ public final class SteveIndustrialAgentMod {
         String phase = System.getProperty(RECOVERY_RELOAD_ACCEPTANCE_PHASE_PROPERTY);
         if (phase != null && !phase.isBlank()) {
             RecoveryReloadAcceptanceFixture.run(event.getServer(), phase, LOGGER);
+        }
+    }
+
+    /** Runs one half of the isolated two-JVM IE Metal Press interruption matrix. */
+    @SubscribeEvent
+    public static void verifyMetalPressRecoveryReloadAcceptance(ServerStartedEvent event) {
+        String phase = System.getProperty(MetalPressRecoveryReloadAcceptanceFixture.PHASE_PROPERTY);
+        if (phase != null && !phase.isBlank()) {
+            MetalPressRecoveryReloadAcceptanceFixture.run(event.getServer(), phase, LOGGER);
+        }
+    }
+
+    /** Runs one half of a real resource-bearing IE Alloy Smelter restart window. */
+    @SubscribeEvent
+    public static void verifyAlloySmelterRecoveryReloadAcceptance(ServerStartedEvent event) {
+        String phase = System.getProperty(
+                AlloySmelterRecoveryReloadAcceptanceFixture.PHASE_PROPERTY);
+        if (phase != null && !phase.isBlank()) {
+            AlloySmelterRecoveryReloadAcceptanceFixture.start(
+                    event.getServer(), phase, LOGGER);
+        }
+    }
+
+    /** Runs one half of a real resource-bound production Metal Press restart. */
+    @SubscribeEvent
+    public static void verifyMetalPressResourceRecoveryReloadAcceptance(ServerStartedEvent event) {
+        String phase = System.getProperty(
+                MetalPressResourceRecoveryReloadAcceptanceFixture.PHASE_PROPERTY);
+        if (phase != null && !phase.isBlank()) {
+            MetalPressResourceRecoveryReloadAcceptanceFixture.start(
+                    event.getServer(), phase, LOGGER);
         }
     }
 
@@ -270,17 +360,90 @@ public final class SteveIndustrialAgentMod {
         }
     }
 
+    /** Two-process Composite reload gate; write and read run in separate JVMs. */
+    @SubscribeEvent
+    public static void verifyCompositeReloadAcceptance(ServerStartedEvent event) {
+        String phase = System.getProperty(CompositeReloadAcceptanceFixture.PHASE_PROPERTY);
+        if (phase != null && !phase.isBlank()) {
+            CompositeReloadAcceptanceFixture.start(event.getServer(), phase, LOGGER);
+        }
+        String resumePhase = System.getProperty(CompositeResumeAcceptanceFixture.PHASE_PROPERTY);
+        if (resumePhase != null && !resumePhase.isBlank()) {
+            CompositeResumeAcceptanceFixture.start(event.getServer(), resumePhase, LOGGER);
+        }
+        if (Boolean.getBoolean(WarehouseUnattendedAcceptanceFixture.ENABLE_PROPERTY)) {
+            WarehouseUnattendedAcceptanceFixture.start(event.getServer(), LOGGER);
+        }
+        // Standing production instructions outlive the process that received them.
+        // Without this a restarted server reads its orders, finds no runtime and skips
+        // every one of them forever, which looks from the outside like a factory that
+        // simply stopped.
+        WarehouseOrderService.restoreRegisteredRuntimes(event.getServer());
+        String alloyWarehousePhase = System.getProperty(
+                AlloySmelterWarehouseRestartAcceptanceFixture.PHASE_PROPERTY);
+        if (alloyWarehousePhase != null && !alloyWarehousePhase.isBlank()) {
+            AlloySmelterWarehouseRestartAcceptanceFixture.start(
+                    event.getServer(), alloyWarehousePhase, LOGGER);
+        }
+        String restartPhase = System.getProperty(WarehouseRestartAcceptanceFixture.PHASE_PROPERTY);
+        if (restartPhase != null && !restartPhase.isBlank()) {
+            WarehouseRestartAcceptanceFixture.start(event.getServer(), restartPhase, LOGGER);
+        }
+        String resourceRestartPhase = System.getProperty(
+                IndustrialResourceRestartAcceptanceFixture.PHASE_PROPERTY);
+        if (resourceRestartPhase != null && !resourceRestartPhase.isBlank()) {
+            IndustrialResourceRestartAcceptanceFixture.start(
+                    event.getServer(), resourceRestartPhase, LOGGER);
+        }
+    }
+
+    /** Read-only survey of how much of the live registry can be derived and built. */
+    @SubscribeEvent
+    public static void surveyDerivableProducts(ServerStartedEvent event) {
+        if (Boolean.getBoolean(DerivableProductSurveyFixture.ENABLE_PROPERTY)) {
+            DerivableProductSurveyFixture.run(event.getServer(), LOGGER);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void recoverIndustrialPlayerOrders(ServerStartedEvent event) {
+        IndustrialPlayerOrderService.recoverServer(event.getServer());
+    }
+
     @SubscribeEvent
     public static void tickCreateKineticsAcceptance(TickEvent.ServerTickEvent event) {
         if (event.phase == TickEvent.Phase.END) {
             PilotRegionCommand.tick(event.getServer());
             PilotDeploymentCommand.tick(event.getServer());
+            SitePreparationCommand.tick(event.getServer());
+            PlayerRelocationService.tick(event.getServer());
+            PlayerClearingService.tick(event.getServer());
+            PlayerConstructionService.tick(event.getServer());
+            MetalPressProductionService.tick(event.getServer());
+            AlloySmelterProductionService.tick(event.getServer());
+            PlayerCompositeOrderService.tick(event.getServer());
+            WarehouseOrderService.tick(event.getServer());
             if (Boolean.getBoolean(CREATE_KINETICS_ACCEPTANCE_PROPERTY)) {
                 CreateKineticsAcceptanceFixture.tick(event.getServer());
             }
             if (Boolean.getBoolean(DeceasedCraftExecutionPilotFixture.ENABLE_PROPERTY)) {
                 DeceasedCraftExecutionPilotFixture.tick(event.getServer());
             }
+            if (Boolean.getBoolean(
+                    ImmersiveEngineeringV1020PhysicalAcceptanceFixture.ENABLE_PROPERTY)) {
+                ImmersiveEngineeringV1020PhysicalAcceptanceFixture.tick(event.getServer());
+            }
+            if (Boolean.getBoolean(CompositePlayerOrderAcceptanceRunner.ENABLE_PROPERTY)) {
+                CompositePlayerOrderAcceptanceRunner.tick(event.getServer());
+            }
+            CompositeReloadAcceptanceFixture.tick(event.getServer());
+            CompositeResumeAcceptanceFixture.tick(event.getServer());
+            WarehouseUnattendedAcceptanceFixture.tick(event.getServer());
+            WarehouseRestartAcceptanceFixture.tick(event.getServer());
+            AlloySmelterRecoveryReloadAcceptanceFixture.tick(event.getServer());
+            MetalPressResourceRecoveryReloadAcceptanceFixture.tick(event.getServer());
+            AlloySmelterWarehouseRestartAcceptanceFixture.tick(event.getServer());
+            IndustrialResourceRestartAcceptanceFixture.tick(event.getServer());
         }
     }
 
@@ -334,6 +497,23 @@ public final class SteveIndustrialAgentMod {
     public static void clearRuntimeCatalogs(ServerStoppedEvent event) {
         ForgeCreateRuntimeRecipeCatalogs.clear(event.getServer());
         PilotRegionCommand.clearServerState();
+        SitePreparationCommand.clearServerState();
+        PlayerWorkflowNetwork.clearServerState();
+        PlayerRelocationService.clearServerState();
+        PlayerClearingService.clearServerState();
+        PlayerConstructionService.clearServerState();
+        MetalPressProductionService.clearServerState();
+        AlloySmelterProductionService.clearServerState();
+        PlayerCompositeOrderService.clearServerState();
+        WarehouseOrderService.clearServerState();
+    }
+
+    @SubscribeEvent
+    public static void clearPlayerWorkflowSession(PlayerEvent.PlayerLoggedOutEvent event) {
+        PlayerWorkflowNetwork.clearPlayer(event.getEntity().getUUID());
+        PlayerRelocationService.clearPlayer(event.getEntity().getUUID());
+        PlayerClearingService.clearPlayer(event.getEntity().getUUID());
+        PlayerConstructionService.clearPlayer(event.getEntity().getUUID());
     }
 
     private static void failRuntimeProfile(ServerStartedEvent event, String detail) {
@@ -405,9 +585,39 @@ public final class SteveIndustrialAgentMod {
                 .then(CreateDeploymentDryRunCommand.command())
                 .then(SetupCommand.command())
                 .then(BackupCommand.command())
-                .then(PilotRegionCommand.command());
+                .then(PilotRegionCommand.command())
+                .then(SitePreparationCommand.command());
         dev.stevecreate.agent.forge1201.command.ReleaseInfoCommand.attach(root);
+        dev.stevecreate.agent.forge1201.command.BuildModeCommand.attach(root);
+        dev.stevecreate.agent.forge1201.command.MetalPressProductionCommand.attach(root);
+        dev.stevecreate.agent.forge1201.command.CompositeProductionCommand.attach(root);
+        // The fixture only prepares a bounded disposable arena and bill. It is kept out
+        // of production command registration so a normal server never exposes a material
+        // seeding helper; the subsequent /steveagent composite create still remains the
+        // real player order path.
+        if (!net.minecraftforge.fml.loading.FMLLoader.isProduction()) {
+            root.then(dev.stevecreate.agent.forge1201.command.CompositeClientAcceptanceCommand
+                    .command());
+            root.then(dev.stevecreate.agent.forge1201.command.PlayerCreateClientAcceptanceCommand
+                    .command());
+        }
+        dev.stevecreate.agent.forge1201.command.WarehouseProductionCommand.attach(root);
+        dev.stevecreate.agent.forge1201.command.WarehouseDiscoveryCommand.attach(root);
+        dev.stevecreate.agent.forge1201.command.FactoryDiagnosticCommand.attach(root);
+        root.then(Commands.literal("order").then(Commands.literal("status")
+                .executes(context -> {
+                    if (!(context.getSource().getEntity() instanceof net.minecraft.server.level.ServerPlayer player)) {
+                        context.getSource().sendFailure(Component.literal("player-only order status"));
+                        return 0;
+                    }
+                    IndustrialPlayerOrderService.sendStatus(player);
+                    return 1;
+                })));
         event.getDispatcher().register(root);
+        event.getDispatcher().register(
+                dev.stevecreate.agent.forge1201.command.MetalPressProductionCommand.playerCommand());
+        event.getDispatcher().register(
+                dev.stevecreate.agent.forge1201.command.CompositeProductionCommand.playerCommand());
     }
 
     private static int scan(

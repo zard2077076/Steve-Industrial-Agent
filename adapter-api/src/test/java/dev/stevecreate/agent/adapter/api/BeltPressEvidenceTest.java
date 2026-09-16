@@ -19,7 +19,7 @@ class BeltPressEvidenceTest {
         BeltPressEvidence evidence = evidence(plan, speeds, true);
 
         speeds.clear();
-        assertThat(evidence.observedSpeedRpm()).hasSize(6);
+        assertThat(evidence.observedSpeedRpm()).hasSize(10);
         assertThatThrownBy(() -> evidence.verifiedPlacements().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> evidence.observedSpeedRpm().clear())

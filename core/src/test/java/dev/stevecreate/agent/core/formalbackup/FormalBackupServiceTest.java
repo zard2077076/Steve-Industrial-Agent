@@ -42,6 +42,7 @@ class FormalBackupServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        temp = temp.toRealPath();
         platform = Files.createDirectories(temp.resolve("formal-platform"));
         instance = Files.createDirectories(platform.resolve("instances/pack"));
         source = Files.createDirectories(instance.resolve("saves/world"));

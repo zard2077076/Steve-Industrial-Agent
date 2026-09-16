@@ -17,11 +17,29 @@ import net.minecraft.world.level.block.Block;
 import net.minecraftforge.registries.ForgeRegistries;
 
 /** One-cell-per-tick physical ITEM-route construction owned by the verified root session. */
-final class Create606PhysicalItemRouteBuilder {
+public final class Create606PhysicalItemRouteBuilder {
     private static final ResourceId STEP_ID =
             ResourceId.parse("steve_industrial:execution/connect_item_routes");
     private static final ResourceLocation ROUTE_BLOCK =
-            new ResourceLocation("create", "andesite_casing");
+            ResourceLocation.fromNamespaceAndPath("create", "andesite_casing");
+
+    /**
+     * What an item route is built from, for whoever has to pay for it.
+     *
+     * <p>The executor knew this and the material plan did not, so the player path refused
+     * every plan containing a route rather than price one.</p>
+     */
+    public static ResourceId routeBlock() {
+        return ResourceId.parse(ROUTE_BLOCK.toString());
+    }
+
+    /** How many cells a set of routes will lay, counted the way the executor lays them. */
+    public static int interiorCellCount(List<PhysicalRoute> routes) {
+        LinkedHashSet<BlockPos3i> interiors = new LinkedHashSet<>();
+        Objects.requireNonNull(routes, "routes")
+                .forEach(route -> interiors.addAll(route.interiorPositions()));
+        return interiors.size();
+    }
 
     private final ServerLevel level;
     private final List<BlockPos3i> cells;
@@ -36,11 +54,10 @@ final class Create606PhysicalItemRouteBuilder {
         this.journal = new Create606WorldChangeJournal(level,
                 new ResourceId(rootSessionId.namespace(), rootSessionId.path() + "/item_routes"));
         LinkedHashSet<BlockPos3i> interiors = new LinkedHashSet<>();
-        for (PhysicalRoute route : Objects.requireNonNull(routes, "routes")) {
-            for (int index = 1; index < route.positions().size() - 1; index++) {
-                interiors.add(route.positions().get(index));
-            }
-        }
+        // The same definition the material plan prices, so what is charged for and what
+        // is built cannot drift apart.
+        Objects.requireNonNull(routes, "routes")
+                .forEach(route -> interiors.addAll(route.interiorPositions()));
         this.cells = List.copyOf(interiors);
     }
 
@@ -78,6 +95,10 @@ final class Create606PhysicalItemRouteBuilder {
 
     boolean complete() { return cursor >= cells.size(); }
     int cellCount() { return cells.size(); }
+    BlockPos3i nextCell() {
+        if (complete()) throw new IllegalStateException("ITEM route is already complete");
+        return cells.get(cursor);
+    }
     WorldChangeJournal journal() { return journal.snapshot(); }
     RollbackReport rollback() { return journal.rollback(); }
     List<BlockPos3i> cells() { return cells; }

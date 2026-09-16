@@ -1,0 +1,13 @@
+package dev.stevecreate.agent.core.electrical;
+
+public enum ElectricalNetworkFailure {
+    EDGE_TOO_LONG,
+    VOLTAGE_TIER_MISMATCH,
+    INTERFACE_DIRECTION_MISSING,
+    WIRE_COLLISION,
+    DISCONNECTED,
+    EDGE_CAPACITY_EXCEEDED,
+    GENERATION_DEFICIT,
+    STORAGE_HEADROOM_INSUFFICIENT,
+    CONSUMER_UNREACHABLE
+}

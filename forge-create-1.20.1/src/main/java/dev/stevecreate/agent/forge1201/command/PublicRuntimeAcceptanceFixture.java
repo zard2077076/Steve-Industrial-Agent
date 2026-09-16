@@ -1,5 +1,7 @@
 package dev.stevecreate.agent.forge1201.command;
 
+import dev.stevecreate.agent.forge1201.acceptance.AcceptanceRuntimeGuard;
+
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +21,7 @@ public final class PublicRuntimeAcceptanceFixture {
     private PublicRuntimeAcceptanceFixture() {}
 
     public static void run(MinecraftServer server, String phase, Logger logger) {
+        AcceptanceRuntimeGuard.requireDevelopmentRuntime("PublicRuntimeAcceptanceFixture");
         try {
             if (!"prepare".equals(phase) && !"verify".equals(phase)) {
                 throw new IllegalArgumentException("Unknown public runtime acceptance phase: " + phase);

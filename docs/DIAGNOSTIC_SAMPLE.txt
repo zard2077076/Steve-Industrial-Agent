@@ -1,0 +1,14 @@
+Steve Industrial Agent diagnostics/v1
+create=6.0.6
+dimension=minecraft:overworld
+forge=47.4.0
+gitCommit=000000000000
+java=17
+minecraft=1.20.1
+network=false
+os=Windows 11
+telemetry=false
+version=0.1.0-alpha.1
+worldClassification=disposable-test-world
+redactedFields=absolute paths,tokens,chat,playerdata,world seed,coordinates,container contents,world files
+automaticUpload=false

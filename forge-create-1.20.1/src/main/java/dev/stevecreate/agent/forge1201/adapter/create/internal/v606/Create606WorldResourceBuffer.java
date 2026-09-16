@@ -7,9 +7,23 @@ import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.ResourceId;
 import dev.stevecreate.agent.core.plan.BeltPressPlan;
 import dev.stevecreate.agent.core.plan.BeltPressRole;
+import dev.stevecreate.agent.core.plan.BasinPressPlan;
+import dev.stevecreate.agent.core.plan.BasinPressRole;
+import dev.stevecreate.agent.core.plan.BasinMixerPlan;
+import dev.stevecreate.agent.core.plan.DeployerPlan;
+import dev.stevecreate.agent.core.plan.DeployerRole;
+import dev.stevecreate.agent.core.plan.BasinMixerRole;
+import dev.stevecreate.agent.core.plan.CrushingWheelPlan;
+import dev.stevecreate.agent.core.plan.CrushingWheelRole;
+import dev.stevecreate.agent.core.plan.MechanicalSawPlan;
+import dev.stevecreate.agent.core.plan.MechanicalSawRole;
+import dev.stevecreate.agent.core.plan.FanProcessingPlan;
+import dev.stevecreate.agent.core.plan.FanProcessingRole;
 import dev.stevecreate.agent.core.plan.WaterWheelMillstonePlan;
 import dev.stevecreate.agent.core.plan.WaterWheelMillstoneRole;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -72,6 +86,64 @@ final class Create606WorldResourceBuffer {
         }
         chest.setChanged();
         return new AdapterResult.Success<>(new ItemStack(item, count));
+    }
+
+    /**
+     * Extracts only tag-free instances for interaction handlers that must not normalize or mutate
+     * unknown NBT. Tagged stacks of the same item are left untouched and do not count as input.
+     */
+    AdapterResult<ItemStack> extractExactNbtFree(ResourceId itemId, int count) {
+        Optional<AdapterResult<ItemStack>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(itemId, "itemId");
+        if (count < 1 || count > 64) {
+            return failure("Requested NBT-free extraction is outside 1..64");
+        }
+        ChestBlockEntity chest = chest();
+        if (chest == null) {
+            return failure("Resource buffer is not a loaded chest at " + position);
+        }
+        Item item = registeredItem(itemId);
+        if (item == null) return failure("Requested buffer item is not registered: " + itemId);
+        int available = 0;
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            ItemStack stack = chest.getItem(slot);
+            if (stack.is(item) && !stack.hasTag()) available += stack.getCount();
+        }
+        if (available < count) {
+            return failure(
+                    "Resource buffer lacks tag-free " + itemId
+                            + ": required=" + count + " available=" + available);
+        }
+        int remaining = count;
+        for (int slot = 0; slot < chest.getContainerSize() && remaining > 0; slot++) {
+            ItemStack stack = chest.getItem(slot);
+            if (!stack.is(item) || stack.hasTag()) continue;
+            int taken = Math.min(remaining, stack.getCount());
+            stack.shrink(taken);
+            if (stack.isEmpty()) chest.setItem(slot, ItemStack.EMPTY);
+            remaining -= taken;
+        }
+        chest.setChanged();
+        return new AdapterResult.Success<>(new ItemStack(item, count));
+    }
+
+    AdapterResult<Integer> availableExactNbtFree(ResourceId itemId) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(itemId, "itemId");
+        ChestBlockEntity chest = chest();
+        if (chest == null) {
+            return failure("Resource buffer is not a loaded chest at " + position);
+        }
+        Item item = registeredItem(itemId);
+        if (item == null) return failure("Requested buffer item is not registered: " + itemId);
+        int available = 0;
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            ItemStack stack = chest.getItem(slot);
+            if (stack.is(item) && !stack.hasTag()) available += stack.getCount();
+        }
+        return new AdapterResult.Success<>(available);
     }
 
     AdapterResult<Integer> insertExact(ItemStack offered) {
@@ -186,6 +258,407 @@ final class Create606WorldResourceBuffer {
         return inserted;
     }
 
+    AdapterResult<Integer> collectBasinPressOutput(BasinPressPlan plan) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(plan, "plan");
+        BlockPos3i outputPosition =
+                plan.placement(BasinPressRole.OUTPUT_CHEST).position();
+        if (!(level.getBlockEntity(pos(outputPosition))
+                instanceof ChestBlockEntity output)) {
+            return failure("Verified C-09 output chest is unavailable");
+        }
+        ResourceId expected = plan.process().expectedOutputItem();
+        Item item = registeredItem(expected);
+        if (item == null) {
+            return failure("Expected C-09 output is unregistered: " + expected);
+        }
+        int available = 0;
+        for (int slot = 0; slot < output.getContainerSize(); slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (stack.isEmpty()) continue;
+            if (!stack.is(item)) {
+                return failure("C-09 output chest changed to an unexpected item");
+            }
+            available = Math.addExact(available, stack.getCount());
+        }
+        if (available != plan.process().expectedOutputCount()) {
+            return failure("Verified C-09 output quantity changed before collection");
+        }
+        if (capacityFor(new ItemStack(item, available)) < available) {
+            return failure("Resource buffer lacks C-09 output capacity");
+        }
+        List<ItemStack> outputBefore = inventorySnapshot(output);
+        ChestBlockEntity buffer = chest();
+        if (buffer == null) {
+            return failure("Resource buffer is not a loaded chest at " + position);
+        }
+        List<ItemStack> bufferBefore = inventorySnapshot(buffer);
+        int remaining = available;
+        for (int slot = 0; slot < output.getContainerSize()
+                && remaining > 0; slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (!stack.is(item)) continue;
+            int taken = Math.min(remaining, stack.getCount());
+            stack.shrink(taken);
+            if (stack.isEmpty()) output.setItem(slot, ItemStack.EMPTY);
+            remaining -= taken;
+        }
+        AdapterResult<Integer> inserted =
+                insertExact(new ItemStack(item, available));
+        if (inserted instanceof AdapterResult.Failure<Integer>) {
+            restoreInventory(output, outputBefore);
+            restoreInventory(buffer, bufferBefore);
+            return inserted;
+        }
+        output.setChanged();
+        return new AdapterResult.Success<>(available);
+    }
+
+    AdapterResult<Integer> collectBasinMixerOutput(
+            BasinMixerPlan plan) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(plan, "plan");
+        BlockPos3i outputPosition =
+                plan.placement(BasinMixerRole.OUTPUT_CHEST)
+                        .position();
+        if (!(level.getBlockEntity(pos(outputPosition))
+                instanceof ChestBlockEntity output)) {
+            return failure(
+                    "Verified C-08 output chest is unavailable");
+        }
+        ResourceId expected =
+                plan.process().expectedOutputItem();
+        Item item = registeredItem(expected);
+        if (item == null) {
+            return failure(
+                    "Expected C-08 output is unregistered: "
+                            + expected);
+        }
+        int available = 0;
+        for (int slot = 0;
+                slot < output.getContainerSize();
+                slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (stack.isEmpty()) continue;
+            if (!stack.is(item)
+                    || stack.hasTag()
+                    || stack.hasCraftingRemainingItem()) {
+                return failure(
+                        "C-08 output chest changed to an unexpected, NBT or residue item");
+            }
+            available = Math.addExact(
+                    available, stack.getCount());
+        }
+        if (available
+                != plan.process().expectedOutputCount()) {
+            return failure(
+                    "Verified C-08 output quantity changed before collection");
+        }
+        if (capacityFor(new ItemStack(item, available))
+                < available) {
+            return failure(
+                    "Resource buffer lacks C-08 output capacity");
+        }
+        List<ItemStack> outputBefore =
+                inventorySnapshot(output);
+        ChestBlockEntity buffer = chest();
+        if (buffer == null) {
+            return failure(
+                    "Resource buffer is not a loaded chest at "
+                            + position);
+        }
+        List<ItemStack> bufferBefore =
+                inventorySnapshot(buffer);
+        int remaining = available;
+        for (int slot = 0;
+                slot < output.getContainerSize()
+                        && remaining > 0;
+                slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (!stack.is(item)) continue;
+            int taken = Math.min(
+                    remaining, stack.getCount());
+            stack.shrink(taken);
+            if (stack.isEmpty()) {
+                output.setItem(slot, ItemStack.EMPTY);
+            }
+            remaining -= taken;
+        }
+        AdapterResult<Integer> inserted =
+                insertExact(new ItemStack(item, available));
+        if (inserted
+                instanceof AdapterResult.Failure<Integer>) {
+            restoreInventory(output, outputBefore);
+            restoreInventory(buffer, bufferBefore);
+            return inserted;
+        }
+        output.setChanged();
+        return new AdapterResult.Success<>(available);
+    }
+
+    AdapterResult<Integer> collectDeployerOutput(
+            DeployerPlan plan) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(plan, "plan");
+        BlockPos3i outputPosition = plan.placement(
+                DeployerRole.OUTPUT_CHEST).position();
+        if (!(level.getBlockEntity(pos(outputPosition))
+                instanceof ChestBlockEntity output)) {
+            return failure(
+                    "Verified C-10 output chest is unavailable");
+        }
+        ResourceId expected =
+                plan.process().expectedOutputItem();
+        Item item = registeredItem(expected);
+        if (item == null) {
+            return failure(
+                    "Expected C-10 output is unregistered: "
+                            + expected);
+        }
+        int available = 0;
+        for (int slot = 0;
+                slot < output.getContainerSize();
+                slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (stack.isEmpty()) continue;
+            if (!stack.is(item)
+                    || stack.hasTag()
+                    || stack.hasCraftingRemainingItem()) {
+                return failure(
+                        "C-10 output chest changed to an unexpected, NBT or residue item");
+            }
+            available = Math.addExact(
+                    available, stack.getCount());
+        }
+        if (available
+                != plan.process().expectedOutputCount()) {
+            return failure(
+                    "Verified C-10 output quantity changed before collection");
+        }
+        if (capacityFor(new ItemStack(item, available))
+                < available) {
+            return failure(
+                    "Resource buffer lacks C-10 output capacity");
+        }
+        List<ItemStack> outputBefore =
+                inventorySnapshot(output);
+        ChestBlockEntity buffer = chest();
+        if (buffer == null) {
+            return failure(
+                    "Resource buffer is not a loaded chest at "
+                            + position);
+        }
+        List<ItemStack> bufferBefore =
+                inventorySnapshot(buffer);
+        int remaining = available;
+        for (int slot = 0;
+                slot < output.getContainerSize()
+                        && remaining > 0;
+                slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (!stack.is(item)) continue;
+            int taken = Math.min(
+                    remaining, stack.getCount());
+            stack.shrink(taken);
+            if (stack.isEmpty()) {
+                output.setItem(slot, ItemStack.EMPTY);
+            }
+            remaining -= taken;
+        }
+        AdapterResult<Integer> inserted =
+                insertExact(new ItemStack(item, available));
+        if (inserted
+                instanceof AdapterResult.Failure<Integer>) {
+            restoreInventory(output, outputBefore);
+            restoreInventory(buffer, bufferBefore);
+            return inserted;
+        }
+        output.setChanged();
+        return new AdapterResult.Success<>(available);
+    }
+
+    AdapterResult<Integer> collectSawOutput(MechanicalSawPlan plan) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(plan, "plan");
+        BlockPos3i outputPosition =
+                plan.placement(MechanicalSawRole.OUTPUT_CHEST).position();
+        if (!(level.getBlockEntity(pos(outputPosition)) instanceof ChestBlockEntity output)) {
+            return failure("Verified C-07 output chest is unavailable");
+        }
+        ResourceId expected = plan.process().expectedOutputItem();
+        int count = plan.process().minimumOutputCount();
+        Item item = registeredItem(expected);
+        if (item == null) return failure("Expected C-07 output is unregistered: " + expected);
+        int available = 0;
+        for (int slot = 0; slot < output.getContainerSize(); slot++) {
+            if (output.getItem(slot).is(item)) available += output.getItem(slot).getCount();
+        }
+        if (available < count) {
+            return failure("Verified C-07 output quantity changed before collection");
+        }
+        if (capacityFor(new ItemStack(item, count)) < count) {
+            return failure("Resource buffer lacks C-07 output capacity");
+        }
+        int remaining = count;
+        for (int slot = 0; slot < output.getContainerSize() && remaining > 0; slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (!stack.is(item)) continue;
+            int taken = Math.min(remaining, stack.getCount());
+            stack.shrink(taken);
+            if (stack.isEmpty()) output.setItem(slot, ItemStack.EMPTY);
+            remaining -= taken;
+        }
+        AdapterResult<Integer> inserted = insertExact(new ItemStack(item, count));
+        if (inserted instanceof AdapterResult.Failure<Integer>) {
+            restoreToChest(output, new ItemStack(item, count));
+            return inserted;
+        }
+        output.setChanged();
+        return inserted;
+    }
+
+    AdapterResult<Integer> collectFanOutput(FanProcessingPlan plan) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(plan, "plan");
+        BlockPos3i outputPosition =
+                plan.placement(FanProcessingRole.OUTPUT_CHEST).position();
+        if (!(level.getBlockEntity(pos(outputPosition))
+                instanceof ChestBlockEntity output)) {
+            return failure("Verified C-06 output chest is unavailable");
+        }
+        ResourceId expected = plan.process().expectedOutputItem();
+        int count = plan.process().minimumOutputCount();
+        Item item = registeredItem(expected);
+        if (item == null) {
+            return failure("Expected C-06 output is unregistered: " + expected);
+        }
+        int available = 0;
+        for (int slot = 0; slot < output.getContainerSize(); slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (stack.isEmpty()) continue;
+            if (!stack.is(item)) {
+                return failure("C-06 output chest changed to an unexpected item");
+            }
+            available += stack.getCount();
+        }
+        if (available < count) {
+            return failure("Verified C-06 output quantity changed before collection");
+        }
+        if (capacityFor(new ItemStack(item, available)) < available) {
+            return failure("Resource buffer lacks C-06 output capacity");
+        }
+        List<ItemStack> outputBefore = inventorySnapshot(output);
+        ChestBlockEntity buffer = chest();
+        if (buffer == null) {
+            return failure("Resource buffer is not a loaded chest at " + position);
+        }
+        List<ItemStack> bufferBefore = inventorySnapshot(buffer);
+        int remaining = available;
+        for (int slot = 0; slot < output.getContainerSize() && remaining > 0; slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (!stack.is(item)) continue;
+            int taken = Math.min(remaining, stack.getCount());
+            stack.shrink(taken);
+            if (stack.isEmpty()) output.setItem(slot, ItemStack.EMPTY);
+            remaining -= taken;
+        }
+        AdapterResult<Integer> inserted =
+                insertExact(new ItemStack(item, available));
+        if (inserted instanceof AdapterResult.Failure<Integer>) {
+            restoreInventory(output, outputBefore);
+            restoreInventory(buffer, bufferBefore);
+            return inserted;
+        }
+        output.setChanged();
+        return new AdapterResult.Success<>(available);
+    }
+
+    AdapterResult<Integer> collectCrushingOutput(CrushingWheelPlan plan) {
+        Optional<AdapterResult<Integer>> guarded = guardFailure();
+        if (guarded.isPresent()) return guarded.orElseThrow();
+        Objects.requireNonNull(plan, "plan");
+        BlockPos3i outputPosition =
+                plan.placement(CrushingWheelRole.OUTPUT_CHEST).position();
+        if (outputPosition.equals(position)) {
+            return failure("C-05 output chest cannot also be the resource buffer");
+        }
+        if (!(level.getBlockEntity(pos(outputPosition))
+                instanceof ChestBlockEntity output)) {
+            return failure("Verified crushing output chest is unavailable");
+        }
+        ChestBlockEntity buffer = chest();
+        if (buffer == null) {
+            return failure("Resource buffer is not a loaded chest at " + position);
+        }
+
+        LinkedHashMap<ResourceId, Integer> requested = new LinkedHashMap<>();
+        requested.put(plan.process().expectedOutputItem(), 0);
+        plan.process().optionalByproducts().forEach(
+                value -> requested.put(value.resourceId(), 0));
+        for (int slot = 0; slot < output.getContainerSize(); slot++) {
+            ItemStack stack = output.getItem(slot);
+            if (stack.isEmpty()) continue;
+            ResourceId itemId = itemId(stack);
+            if (itemId == null || !requested.containsKey(itemId)) {
+                return failure("Crushing output chest changed to an unexpected item");
+            }
+            requested.merge(itemId, stack.getCount(), Math::addExact);
+        }
+        requested.entrySet().removeIf(entry -> entry.getValue() == 0);
+        int primaryCount = requested.getOrDefault(
+                plan.process().expectedOutputItem(), 0);
+        if (primaryCount < plan.process().minimumOutputCount()) {
+            return failure("Verified crushing primary output changed before collection");
+        }
+
+        ArrayList<ItemStack> transfers = new ArrayList<>();
+        for (Map.Entry<ResourceId, Integer> entry : requested.entrySet()) {
+            Item item = registeredItem(entry.getKey());
+            if (item == null) {
+                return failure("Observed crushing output is unregistered: " + entry.getKey());
+            }
+            int available = 0;
+            for (int slot = 0; slot < output.getContainerSize(); slot++) {
+                ItemStack stack = output.getItem(slot);
+                if (stack.is(item)) available += stack.getCount();
+            }
+            if (available < entry.getValue()) {
+                return failure("Verified crushing output quantity changed for " + entry.getKey());
+            }
+            transfers.add(new ItemStack(item, entry.getValue()));
+        }
+        if (!hasCapacityForAll(buffer, transfers)) {
+            return failure("Resource buffer lacks capacity for all crushing outputs");
+        }
+
+        List<ItemStack> outputBefore = inventorySnapshot(output);
+        List<ItemStack> bufferBefore = inventorySnapshot(buffer);
+        for (ItemStack transfer : transfers) {
+            int remaining = transfer.getCount();
+            for (int slot = 0; slot < output.getContainerSize() && remaining > 0; slot++) {
+                ItemStack stack = output.getItem(slot);
+                if (!ItemStack.isSameItemSameTags(stack, transfer)) continue;
+                int taken = Math.min(remaining, stack.getCount());
+                stack.shrink(taken);
+                if (stack.isEmpty()) output.setItem(slot, ItemStack.EMPTY);
+                remaining -= taken;
+            }
+            AdapterResult<Integer> inserted = insertExact(transfer);
+            if (inserted instanceof AdapterResult.Failure<Integer> failure) {
+                restoreInventory(output, outputBefore);
+                restoreInventory(buffer, bufferBefore);
+                return failure;
+            }
+        }
+        output.setChanged();
+        return new AdapterResult.Success<>(primaryCount);
+    }
+
     private ChestBlockEntity chest() {
         if (!level.getServer().isSameThread() || !level.hasChunk(position.x() >> 4, position.z() >> 4)) {
             return null;
@@ -209,6 +682,58 @@ final class Create606WorldResourceBuffer {
         return capacity;
     }
 
+    private static boolean hasCapacityForAll(
+            ChestBlockEntity chest,
+            List<ItemStack> offered) {
+        List<ItemStack> simulated = inventorySnapshot(chest);
+        for (ItemStack value : offered) {
+            int remaining = value.getCount();
+            for (ItemStack present : simulated) {
+                if (present.isEmpty() || !ItemStack.isSameItemSameTags(present, value)) continue;
+                int moved = Math.min(
+                        remaining,
+                        Math.min(present.getMaxStackSize(), chest.getMaxStackSize())
+                                - present.getCount());
+                if (moved > 0) {
+                    present.grow(moved);
+                    remaining -= moved;
+                }
+            }
+            for (int slot = 0; slot < simulated.size() && remaining > 0; slot++) {
+                if (!simulated.get(slot).isEmpty()) continue;
+                int moved = Math.min(
+                        remaining,
+                        Math.min(value.getMaxStackSize(), chest.getMaxStackSize()));
+                ItemStack placed = value.copy();
+                placed.setCount(moved);
+                simulated.set(slot, placed);
+                remaining -= moved;
+            }
+            if (remaining > 0) return false;
+        }
+        return true;
+    }
+
+    private static List<ItemStack> inventorySnapshot(ChestBlockEntity chest) {
+        ArrayList<ItemStack> values = new ArrayList<>(chest.getContainerSize());
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            values.add(chest.getItem(slot).copy());
+        }
+        return values;
+    }
+
+    private static void restoreInventory(
+            ChestBlockEntity chest,
+            List<ItemStack> values) {
+        if (values.size() != chest.getContainerSize()) {
+            throw new IllegalArgumentException("Chest snapshot size changed during C-05 transfer");
+        }
+        for (int slot = 0; slot < values.size(); slot++) {
+            chest.setItem(slot, values.get(slot).copy());
+        }
+        chest.setChanged();
+    }
+
     private static void restoreToChest(ChestBlockEntity chest, ItemStack value) {
         for (int slot = 0; slot < chest.getContainerSize(); slot++) {
             if (chest.getItem(slot).isEmpty()) {
@@ -224,7 +749,7 @@ final class Create606WorldResourceBuffer {
         return new BlockPos(value.x(), value.y(), value.z());
     }
 
-    private static ResourceId itemId(ItemStack stack) {
+    static ResourceId itemId(ItemStack stack) {
         if (stack.isEmpty()) return null;
         ResourceLocation key = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return key == null ? null : new ResourceId(key.getNamespace(), key.getPath());

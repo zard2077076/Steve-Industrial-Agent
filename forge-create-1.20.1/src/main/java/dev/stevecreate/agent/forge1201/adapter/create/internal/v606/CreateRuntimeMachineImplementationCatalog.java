@@ -29,9 +29,26 @@ import java.util.Set;
 /** Exact Create 6.0.6 implementation declarations backed by accepted C-03/C-04 evidence. */
 public final class CreateRuntimeMachineImplementationCatalog
         implements RuntimeMachineImplementationCatalogAdapter {
+    public static final ResourceId CRUSHING_WHEEL_PAIR_IMPLEMENTATION_ID = id(
+            "create:mechanical_crushing_wheel_pair");
     public static final ResourceId MILLSTONE_IMPLEMENTATION_ID = id(
             "create:mechanical_millstone");
     public static final ResourceId PRESS_IMPLEMENTATION_ID = id("create:mechanical_press");
+    public static final ResourceId SAW_IMPLEMENTATION_ID = id("create:mechanical_saw_item_processor");
+    public static final ResourceId FAN_WASHING_IMPLEMENTATION_ID =
+            id("create:encased_fan_washing_cell");
+    public static final ResourceId FAN_SMOKING_IMPLEMENTATION_ID =
+            id("create:encased_fan_smoking_cell");
+    public static final ResourceId FAN_HAUNTING_IMPLEMENTATION_ID =
+            id("create:encased_fan_haunting_cell");
+    public static final ResourceId FAN_BLASTING_IMPLEMENTATION_ID =
+            id("create:encased_fan_blasting_cell");
+    public static final ResourceId BASIN_PRESS_COMPACTING_IMPLEMENTATION_ID =
+            id("create:basin_mechanical_press_compacting");
+    public static final ResourceId BASIN_MIXER_IMPLEMENTATION_ID =
+            id("create:basin_mechanical_mixer");
+    public static final ResourceId DEPLOYER_IMPLEMENTATION_ID =
+            id("create:owned_depot_deployer");
 
     private static final ResourceId ADAPTER_ID = CreateRuntimeMachineCapabilityCatalog.ADAPTER_ID;
     private static final String MINECRAFT_VERSION = "1.20.1";
@@ -100,24 +117,161 @@ public final class CreateRuntimeMachineImplementationCatalog
                 capabilities, CreateRuntimeMachineCapabilityCatalog.MILLING_CAPABILITY_ID);
         Optional<RuntimeMachineCapabilityDeclaration> pressing = declaration(
                 capabilities, CreateRuntimeMachineCapabilityCatalog.PRESSING_CAPABILITY_ID);
-        if (milling.isEmpty() || pressing.isEmpty()) {
+        Optional<RuntimeMachineCapabilityDeclaration> crushing = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.CRUSHING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> cutting = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.CUTTING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> fanWashing = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.FAN_WASHING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> fanSmoking = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.FAN_SMOKING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> fanHaunting = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.FAN_HAUNTING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> fanBlasting = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.FAN_BLASTING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> compacting = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.COMPACTING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> mixing = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.MIXING_CAPABILITY_ID);
+        Optional<RuntimeMachineCapabilityDeclaration> deploying = declaration(
+                capabilities, CreateRuntimeMachineCapabilityCatalog.DEPLOYING_CAPABILITY_ID);
+        if (milling.isEmpty() || pressing.isEmpty() || crushing.isEmpty() || cutting.isEmpty()
+                || fanWashing.isEmpty() || fanSmoking.isEmpty()
+                || fanHaunting.isEmpty() || fanBlasting.isEmpty()
+                || compacting.isEmpty() || mixing.isEmpty() || deploying.isEmpty()) {
             return failure(
                     BindingFailureCode.IMPLEMENTATION_CAPABILITY_MISMATCH,
                     recipes.runtimeFingerprint(),
-                    "required_capabilities=create:milling,create:pressing",
+                    "required_capabilities=create:crushing,create:cutting,create:splashing,"
+                            + "minecraft:smoking,create:haunting,minecraft:blasting,"
+                            + "create:milling,create:pressing,create:compacting,create:mixing,"
+                            + "create:deploying",
                     "Publish the exact v606 runtime capability snapshot before implementations");
         }
         if (!milling.get().physicalExecutionAvailable()
-                || !pressing.get().physicalExecutionAvailable()) {
+                || !pressing.get().physicalExecutionAvailable()
+                || !crushing.get().physicalExecutionAvailable()
+                || !cutting.get().physicalExecutionAvailable()
+                || !fanWashing.get().physicalExecutionAvailable()
+                || !fanSmoking.get().physicalExecutionAvailable()
+                || !fanHaunting.get().physicalExecutionAvailable()
+                || !fanBlasting.get().physicalExecutionAvailable()
+                || !compacting.get().physicalExecutionAvailable()
+                || !mixing.get().physicalExecutionAvailable()
+                || !deploying.get().physicalExecutionAvailable()) {
             return failure(
                     BindingFailureCode.IMPLEMENTATION_EXECUTION_UNVERIFIED,
                     recipes.runtimeFingerprint(),
-                    "physical_execution_evidence=C-03,C-04",
+                    "physical_execution_evidence=C-03,C-04,C-05,C-06,C-07,C-08-WIP,C-09-WIP,C-10-WIP",
                     "Keep the implementation unavailable until physical acceptance evidence exists");
         }
 
         String fingerprint = recipes.runtimeFingerprint();
         List<MachineImplementationDescriptor> descriptors = List.of(
+                descriptor(
+                        CRUSHING_WHEEL_PAIR_IMPLEMENTATION_ID,
+                        id("create:crushing_wheel"),
+                        id("create:entity_input_crushing"),
+                        "crushing_wheel_pair",
+                        crushing.get(),
+                        createVersion,
+                        fingerprint,
+                        List.of(
+                                ORIENTATION_LIMITATION,
+                                "C-05 supports opposed wheels, entity input and hopper/chest output only",
+                                "probabilistic outputs are observed, never promoted to guaranteed output"),
+                        0,
+                        false,
+                        true),
+                descriptor(
+                        SAW_IMPLEMENTATION_ID,
+                        id("create:mechanical_saw"),
+                        id("create:upward_item_cutting"),
+                        "mechanical_saw",
+                        cutting.get(),
+                        createVersion,
+                        fingerprint,
+                        List.of(
+                                ORIENTATION_LIMITATION,
+                                "C-07 supports only upward-facing item processing",
+                                "world block cutting, tree felling and entity interaction are forbidden"),
+                        0,
+                        false,
+                        false),
+                fanDescriptor(
+                        FAN_WASHING_IMPLEMENTATION_ID,
+                        id("create:fan_washing"),
+                        "fan_washing",
+                        fanWashing.get(),
+                        createVersion,
+                        fingerprint,
+                        false),
+                fanDescriptor(
+                        FAN_SMOKING_IMPLEMENTATION_ID,
+                        id("create:fan_smoking"),
+                        "fan_smoking",
+                        fanSmoking.get(),
+                        createVersion,
+                        fingerprint,
+                        true),
+                fanDescriptor(
+                        FAN_HAUNTING_IMPLEMENTATION_ID,
+                        id("create:fan_haunting"),
+                        "fan_haunting",
+                        fanHaunting.get(),
+                        createVersion,
+                        fingerprint,
+                        true),
+                fanDescriptor(
+                        FAN_BLASTING_IMPLEMENTATION_ID,
+                        id("create:fan_blasting"),
+                        "fan_blasting",
+                        fanBlasting.get(),
+                        createVersion,
+                        fingerprint,
+                        true),
+                descriptor(
+                        BASIN_PRESS_COMPACTING_IMPLEMENTATION_ID,
+                        id("create:mechanical_press"),
+                        id("create:basin_compacting"),
+                        "basin_compacting",
+                        compacting.get(),
+                        createVersion,
+                        fingerprint,
+                        List.of(
+                                ORIENTATION_LIMITATION,
+                                "C-09 is Basin + Mechanical Press and is never C-04 belt pressing",
+                                "Phase I is item-only, deterministic and NONE heat; fluids and HEATED are typed unsupported"),
+                        0,
+                        true,
+                        false),
+                descriptor(
+                        BASIN_MIXER_IMPLEMENTATION_ID,
+                        id("create:mechanical_mixer"),
+                        id("create:basin_mixing"),
+                        "basin_mixing",
+                        mixing.get(),
+                        createVersion,
+                        fingerprint,
+                        List.of(
+                                ORIENTATION_LIMITATION,
+                                "C-08 uses counted tag/any-of-resolved ITEM inputs and exact deterministic output",
+                                "NONE and ordinary-fuel HEATED are supported; fluids, SUPERHEATED, residue and unknown NBT are typed unsupported"),
+                        0,
+                        true,
+                        false),
+                deployerDescriptor(
+                        DEPLOYER_IMPLEMENTATION_ID,
+                        id("create:deployer"),
+                        id("create:owned_depot_item_application"),
+                        deploying.get(),
+                        createVersion,
+                        fingerprint,
+                        List.of(
+                                ORIENTATION_LIMITATION,
+                                "C-10 supports only downward item application on the plan-owned Depot",
+                                "entity/combat/arbitrary block use/container/player inventory/private storage/unknown NBT are forbidden"),
+                        0),
                 descriptor(
                         MILLSTONE_IMPLEMENTATION_ID,
                         id("create:millstone"),
@@ -129,7 +283,9 @@ public final class CreateRuntimeMachineImplementationCatalog
                         List.of(
                                 ORIENTATION_LIMITATION,
                                 "C-03 proves direct millstone inventory processing, not transport routing"),
-                        0),
+                        0,
+                        false,
+                        false),
                 descriptor(
                         PRESS_IMPLEMENTATION_ID,
                         id("create:mechanical_press"),
@@ -141,7 +297,9 @@ public final class CreateRuntimeMachineImplementationCatalog
                         List.of(
                                 ORIENTATION_LIMITATION,
                                 "C-04 proves belt-held pressing with funnel/chest output, not general routing"),
-                        0));
+                        0,
+                        false,
+                        false));
         return new RuntimeMachineImplementationCatalogResult.Success(
                 new RuntimeMachineImplementationCatalogSnapshot(
                         new ImmutableMachineImplementationCatalog(
@@ -151,11 +309,89 @@ public final class CreateRuntimeMachineImplementationCatalog
                         recipes.reloadGeneration()));
     }
 
+    private static MachineImplementationDescriptor fanDescriptor(
+            ResourceId implementationId,
+            ResourceId processingMode,
+            String portPrefix,
+            RuntimeMachineCapabilityDeclaration declaration,
+            String createVersion,
+            String fingerprint,
+            boolean dangerousMedium) {
+        return descriptor(
+                implementationId,
+                id("create:encased_fan"),
+                processingMode,
+                portPrefix,
+                declaration,
+                createVersion,
+                fingerprint,
+                List.of(
+                        ORIENTATION_LIMITATION,
+                        "C-06 uses one owned directional fan, exact medium and bounded containment",
+                        dangerousMedium
+                                ? "Bots cannot deploy or enter the medium; Hybrid must use typed Direct fallback"
+                                : "Bots remain outside the processing lane at a bounded safe standoff"),
+                0,
+                false,
+                false);
+    }
+
     private static MachineImplementationDescriptor descriptor(
             ResourceId implementationId,
             ResourceId familyId,
             ResourceId processingMode,
             String portPrefix,
+            RuntimeMachineCapabilityDeclaration declaration,
+            String createVersion,
+            String fingerprint,
+            List<String> limitations,
+            int priority,
+            boolean multiplexInput,
+            boolean multiplexOutput) {
+        MachineCapability capability = declaration.capability();
+        return new MachineImplementationDescriptor(
+                implementationId,
+                ADAPTER_ID,
+                Set.of(capability.capabilityId()),
+                familyId,
+                capability.supportedRecipeTypes(),
+                capability.inputPortTypes(),
+                capability.outputPortTypes(),
+                List.of(
+                        itemPort(
+                                id("create:" + portPrefix + "_item_input"),
+                                ImplementationPortRole.ITEM_INPUT,
+                                PortMode.INPUT,
+                                VerificationEvidenceKind.INPUT_CONSUMED,
+                                multiplexInput),
+                        itemPort(
+                                id("create:" + portPrefix + "_item_output"),
+                                ImplementationPortRole.ITEM_OUTPUT,
+                                PortMode.OUTPUT,
+                                VerificationEvidenceKind.OUTPUT_PRODUCED,
+                                multiplexOutput),
+                        powerPort(id("create:" + portPrefix + "_rotational_power_input"))),
+                capability.requiredResources(),
+                capability.requiredResources().stream().anyMatch(value -> value.continuous()),
+                processingMode,
+                capability.collectibleEvidence(),
+                capability.supportedDiagnostics(),
+                ImplementationExecutionSupport.PHYSICALLY_VERIFIED,
+                declaration.physicallyVerifiedRecipeIds(),
+                true,
+                MINECRAFT_VERSION,
+                "create",
+                createVersion,
+                fingerprint,
+                ImplementationDescriptorSource.VERSIONED_ADAPTER,
+                limitations,
+                priority);
+    }
+
+    private static MachineImplementationDescriptor deployerDescriptor(
+            ResourceId implementationId,
+            ResourceId familyId,
+            ResourceId processingMode,
             RuntimeMachineCapabilityDeclaration declaration,
             String createVersion,
             String fingerprint,
@@ -172,18 +408,25 @@ public final class CreateRuntimeMachineImplementationCatalog
                 capability.outputPortTypes(),
                 List.of(
                         itemPort(
-                                id("create:" + portPrefix + "_item_input"),
+                                id("create:deployer_processed_item_input"),
                                 ImplementationPortRole.ITEM_INPUT,
                                 PortMode.INPUT,
                                 VerificationEvidenceKind.INPUT_CONSUMED),
                         itemPort(
-                                id("create:" + portPrefix + "_item_output"),
+                                id("create:deployer_held_item_input"),
+                                ImplementationPortRole.ITEM_INPUT,
+                                PortMode.INPUT,
+                                VerificationEvidenceKind.CUSTOM_ADAPTER_EVIDENCE),
+                        itemPort(
+                                id("create:deployer_item_output"),
                                 ImplementationPortRole.ITEM_OUTPUT,
                                 PortMode.OUTPUT,
                                 VerificationEvidenceKind.OUTPUT_PRODUCED),
-                        powerPort(id("create:" + portPrefix + "_rotational_power_input"))),
+                        powerPort(id(
+                                "create:deployer_rotational_power_input"))),
                 capability.requiredResources(),
-                capability.requiredResources().stream().anyMatch(value -> value.continuous()),
+                capability.requiredResources().stream()
+                        .anyMatch(value -> value.continuous()),
                 processingMode,
                 capability.collectibleEvidence(),
                 capability.supportedDiagnostics(),
@@ -204,6 +447,15 @@ public final class CreateRuntimeMachineImplementationCatalog
             ImplementationPortRole role,
             PortMode mode,
             VerificationEvidenceKind evidence) {
+        return itemPort(portId, role, mode, evidence, false);
+    }
+
+    private static ImplementationPortContract itemPort(
+            ResourceId portId,
+            ImplementationPortRole role,
+            PortMode mode,
+            VerificationEvidenceKind evidence,
+            boolean multiplexable) {
         return new ImplementationPortContract(
                 portId,
                 role,
@@ -212,7 +464,7 @@ public final class CreateRuntimeMachineImplementationCatalog
                 1,
                 OptionalLong.empty(),
                 true,
-                false,
+                multiplexable,
                 PortTemporalSemantics.CONTINUOUS,
                 Set.of(id("steve_industrial:direct_item")),
                 Set.of(evidence));

@@ -3,6 +3,47 @@
 - Completed PW-12 with typed authoritative `/industrialagent deploy preview|risks|budget|readiness` dry-run commands, deterministic hash/environment/bounds/material/power/risk/gate output, invalid-input and wrong-thread refusal, real Create-only and disposable DeceasedCraft custom-chain acceptance, and structural proof of zero formal/session/resource/machine/world/LLM authority.
 ## Unreleased
 
+- Stabilized the shared C-03/C-06--C-10 player-acceptance path by waiting for
+  teleport synchronization before fixture inspection, moving the salvage fixture
+  outside the reviewed construction/clearance footprint, and keeping the
+  demolition-approval controls visible in short GUI windows. Focused Harness
+  tests and the full offline Gradle test/build pass; C-06 real-client completion
+  remains unverified.
+- Added the Phase IV-C player-workflow foundation: a craftable Steve Engineer
+  Terminal, bilingual searchable 11-goal picker, server-issued expiring nonces,
+  world-local project persistence, four-direction ghost placement and three
+  honest layout policies. This remains Mac development work and is not a
+  release or formal-world authorization.
+- Added tick-sliced smart relocation over exactly 216 candidates (nine nearby
+  anchors, two elevations, four rotations and three layouts), fail-closed
+  hard-conflict ranking, exact clearance observation, progress UI and stale
+  candidate rescan before selection.
+- Added a one-page clearing confirmation backed by a fresh authoritative
+  survey. Protected blocks, containers/data, unknown blocks and hazards disable
+  approval. Issued two-minute tokens persist exact obstacle states and bind the
+  project, target, quantity, anchor, orientation, layout, region hash, safety
+  policy, player, world, dimension, plan/snapshot hashes and execution mode.
+- Added the WIP player bridge to the existing Site Preparation Bot executor:
+  explicit dedicated salvage-container targeting, exact pre-start revalidation,
+  a short start window, real Bot path/mine/drop/collect/deliver behavior,
+  location-only persistence, safe pause on container/capacity loss and an
+  all-stacks capacity preflight that prevents partial delivery.
+- Added the packet-throttled project HUD and Manage Project screen with
+  evidence-only counts, pause/resume/safe-cancel controls and durable resume
+  routing for placement, survey and approval. A full process restart now marks
+  the project paused and requires fresh authorization instead of reporting a
+  false executor resume. Construction remains stopped at the explicit
+  player-material-source boundary.
+
+- Completed the automated Phase IV C-05 checkpoint: one verified opposed
+  crushing-wheel plan now executes real gravel-to-sand processing through
+  Direct, two active Bots and Hybrid, with live kinetic/controller/recipe/input/
+  chest-output evidence, optional byproduct observation, typed runtime faults,
+  cancellation cleanup and exact mid-BUILD recovery.
+- Added standard and disposable DeceasedCraft crushing recipe discovery. The
+  pack probe selects a safe raw-copper recipe without creating an execution
+  session, reading a save or mutating the external PCL2 instance.
+
 ## 0.1.0-alpha.1 - Release candidate preparation
 
 - Connected production Forge config to setup, region, readiness, dry-run and every exact

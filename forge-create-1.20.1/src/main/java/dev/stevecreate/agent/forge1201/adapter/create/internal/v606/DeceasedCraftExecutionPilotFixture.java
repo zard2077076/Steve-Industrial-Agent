@@ -149,7 +149,11 @@ public final class DeceasedCraftExecutionPilotFixture {
             forceExecutionChunks();
             seedBuffer();
             var started = CreateV606GoalDrivenExecution.begin(
-                    level, ready.executionReadyPlan(), ready.runtime(), bufferPosition);
+                    level,
+                    ready.executionReadyPlan(),
+                    ready.runtime(),
+                    bufferPosition,
+                    ready.executionMetadata());
             require(started instanceof CreateV606GoalDrivenExecution.Started,
                     "Goal execution did not start: " + started);
             session = ((CreateV606GoalDrivenExecution.Started) started).session();

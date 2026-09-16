@@ -57,16 +57,25 @@ import dev.stevecreate.agent.core.deployment.RollbackClassification;
 import dev.stevecreate.agent.core.deployment.WorldEnvironmentDescriptor;
 import dev.stevecreate.agent.core.deployment.WorldEnvironmentType;
 import dev.stevecreate.agent.core.deployment.WritableTestWorldFailureCode;
+import dev.stevecreate.agent.core.execution.construction.ExecutionMode;
+import dev.stevecreate.agent.core.execution.construction.PlacementItemBinding;
 import dev.stevecreate.agent.core.execution.readiness.ExecutionWorldClassification;
 import dev.stevecreate.agent.core.model.BlockPos3i;
 import dev.stevecreate.agent.core.model.QuarterTurn;
 import dev.stevecreate.agent.core.model.ResourceId;
+import dev.stevecreate.agent.core.player.GoalCatalogEntry;
+import dev.stevecreate.agent.core.process.GenericProcessSpec;
+import dev.stevecreate.agent.forge1201.player.PlayerGoalCatalog;
+import dev.stevecreate.agent.core.planning.MaterialConstraints;
 import dev.stevecreate.agent.core.recovery.WorldChangeJournal;
 import dev.stevecreate.agent.core.recovery.RecoveryCheckpoint;
 import dev.stevecreate.agent.core.recovery.RecoveryCheckpointCodec;
+import dev.stevecreate.agent.core.siteprep.PreparedSiteExecutionAuthorization;
+import dev.stevecreate.agent.core.siteprep.PreparedSiteExecutionGate;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateV606GoalDrivenExecution;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateV606GoalDrivenPlanner;
 import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateV606PilotCleanupService;
+import dev.stevecreate.agent.forge1201.adapter.create.internal.v606.CreateV606ThreeModeExecution;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -92,6 +101,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -103,6 +113,18 @@ import org.slf4j.Logger;
 
 /** IWP-04 typed readiness and zero-mutation dry-run bound to a confirmed player region. */
 public final class PilotDeploymentCommand {
+    /**
+     * Whether the single-machine order path would accept this goal as it stands.
+     *
+     * <p>Exposed so a survey can report reachability honestly. Classifying a goal as
+     * single-machine says nothing about whether anything can execute it: the accepted
+     * set is eleven hard-coded (target, quantity) pairs, not a general capability.</p>
+     */
+    public static boolean acceptsSingleMachineGoal(
+            Level level, ResourceId target, long quantity) {
+        return TargetSpec.accepts(level, target, quantity);
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final String BACKUP_EVIDENCE = "steve_industrial.iwp.backupEvidenceRoot";
     private static final String BACKUP_ROOT = "steve_industrial.iwp.backupRoot";
@@ -123,6 +145,7 @@ public final class PilotDeploymentCommand {
     static void attach(LiteralArgumentBuilder<CommandSourceStack> root) {
         root.then(goal("readiness", false));
         root.then(goal("dry-run", true));
+        root.then(siteAnchorGoal());
         root.then(startGoal());
         root.then(Commands.literal("status").executes(context -> status(context.getSource())));
         root.then(Commands.literal("cancel").executes(context -> cancel(context.getSource())));
@@ -160,6 +183,7 @@ public final class PilotDeploymentCommand {
         ACTIVE.clear();
         HISTORY.clear();
         HOLD_TARGETS.clear();
+        BuildModeCommand.clearServerState();
         CreateV606GoalDrivenExecution.clearServerState();
     }
 
@@ -189,7 +213,74 @@ public final class PilotDeploymentCommand {
                         .executes(context -> start(context.getSource(),
                                 net.minecraft.commands.arguments.ResourceLocationArgument.getId(
                                         context, "target_resource"),
-                                LongArgumentType.getLong(context, "quantity")))));
+                                LongArgumentType.getLong(context, "quantity"),
+                                BuildModeCommand.modeFor(context.getSource())))
+                        .then(Commands.literal("--mode")
+                                .then(startMode("direct", ExecutionMode.DIRECT))
+                                .then(startMode("bots", ExecutionMode.BOTS))
+                                .then(startMode("hybrid", ExecutionMode.HYBRID)))));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> siteAnchorGoal() {
+        return Commands.literal("site-anchor").then(Commands.argument(
+                        "target_resource",
+                        net.minecraft.commands.arguments.ResourceLocationArgument.id())
+                .then(Commands.argument("quantity", LongArgumentType.longArg(1, 3))
+                        .executes(context -> siteAnchor(context.getSource(),
+                                net.minecraft.commands.arguments.ResourceLocationArgument.getId(
+                                        context, "target_resource"),
+                                LongArgumentType.getLong(context, "quantity"),
+                                QuarterTurn.ZERO))
+                        .then(siteAnchorOrientation("zero", QuarterTurn.ZERO))
+                        .then(siteAnchorOrientation(
+                                "clockwise_90", QuarterTurn.CLOCKWISE_90))
+                        .then(siteAnchorOrientation(
+                                "clockwise_270", QuarterTurn.CLOCKWISE_270))));
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> siteAnchorOrientation(
+            String literal, QuarterTurn orientation) {
+        return Commands.literal(literal).executes(context -> siteAnchor(
+                context.getSource(),
+                net.minecraft.commands.arguments.ResourceLocationArgument.getId(
+                        context, "target_resource"),
+                LongArgumentType.getLong(context, "quantity"), orientation));
+    }
+
+    private static int siteAnchor(
+            CommandSourceStack source,
+            ResourceLocation targetLocation,
+            long quantity,
+            QuarterTurn orientation) {
+        PilotRegionCommand.ConfirmedPilotContext context =
+                PilotRegionCommand.confirmedContext(source).orElse(null);
+        if (context == null) return 0;
+        ResourceId target = ResourceId.parse(targetLocation.toString());
+        TargetSpec spec = TargetSpec.supported(source.getLevel(), target, quantity);
+        if (spec == null || !spec.preparedSiteRequired) {
+            return refuse(source, context,
+                    WritableTestWorldFailureCode.PILOT_TARGET_UNSUPPORTED,
+                    "Site anchor is available only for exact Phase IV targets");
+        }
+        BlockPos3i anchor = pilotAnchor(
+                context.confirmation().bounds(), spec.physicalModuleCount, orientation);
+        source.sendSuccess(() -> Component.literal(
+                "Phase IV site anchor=" + anchor + " orientation=" + orientation
+                        + " target=" + target + " quantity=" + quantity
+                        + " worldMutation=false; stand on this block and run "
+                        + "/industrialagent site anchor here before site region confirmation"),
+                false);
+        return 1;
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> startMode(
+            String literal,
+            ExecutionMode mode) {
+        return Commands.literal(literal).executes(context -> start(
+                context.getSource(),
+                net.minecraft.commands.arguments.ResourceLocationArgument.getId(
+                        context, "target_resource"),
+                LongArgumentType.getLong(context, "quantity"), mode));
     }
 
     public static void tick(MinecraftServer server) {
@@ -199,7 +290,7 @@ public final class PilotDeploymentCommand {
             ServerPlayer player = server.getPlayerList().getPlayer(playerId);
             if (active.held) continue;
             if (player == null) {
-                if (active.session == null) {
+                if (!active.started()) {
                     ACTIVE.remove(playerId);
                     HISTORY.put(playerId, PilotHistory.pendingCancelled(active.prepared));
                     LOGGER.info("IWP_EXECUTION_CANCELLED disconnected_during_countdown player={} session={}",
@@ -207,7 +298,7 @@ public final class PilotDeploymentCommand {
                     continue;
                 }
             }
-            if (active.session == null) {
+            if (!active.started()) {
                 if (active.countdownTicks > 0) {
                     active.countdownTicks--;
                     if (active.countdownTicks == 40 || active.countdownTicks == 20
@@ -223,17 +314,44 @@ public final class PilotDeploymentCommand {
                 }
                 try {
                     begin(player.serverLevel(), active);
-                    persistActive(player.serverLevel(), playerId, active,
-                            CreateV606GoalDrivenExecution.Phase.BUILD, "execution started");
+                    if (active.mode == ExecutionMode.DIRECT) {
+                        persistActive(player.serverLevel(), playerId, active,
+                                CreateV606GoalDrivenExecution.Phase.BUILD, "execution started");
+                    } else {
+                        persistTerminal(player.serverLevel(), playerId, active.prepared,
+                                PilotRecoverySavedData.Stage.FAILED,
+                                active.threeModeSession.journalsSnapshot(),
+                                "three-mode active; cleanup-only recovery until terminal evidence");
+                    }
                     if (player != null) {
                         player.sendSystemMessage(Component.literal(
                                 "Pilot execution STARTED session="
                                         + active.prepared.execution.executionReadyPlan().sessionId()
+                                        + " mode=" + active.mode.serializedName()
                                         + " stage=BUILD buffer=" + active.prepared.resourceBuffer
+                                        + " delivery=" + active.prepared.deliveryBuffer
                                         + " playerInventoryRead=false"));
                     }
                 } catch (Exception failure) {
+                    if (active.threeModeSession != null) {
+                        try {
+                            int discarded = active.threeModeSession.abortBeforeFirstTick();
+                            LOGGER.info(
+                                    "IWP_THREE_MODE_START_ABORT workersDiscarded={} player={} session={}",
+                                    discarded, playerId,
+                                    active.prepared.execution.executionReadyPlan().sessionId());
+                        } catch (RuntimeException cleanupFailure) {
+                            failure.addSuppressed(cleanupFailure);
+                            LOGGER.error(
+                                    "IWP_THREE_MODE_START_ABORT_FAILED player={} session={}",
+                                    playerId,
+                                    active.prepared.execution.executionReadyPlan().sessionId(),
+                                    cleanupFailure);
+                        }
+                        active.threeModeSession = null;
+                    }
                     cleanupBuffer(player.serverLevel(), active.prepared.resourceBuffer);
+                    cleanupBuffer(player.serverLevel(), active.prepared.deliveryBuffer);
                     ACTIVE.remove(playerId);
                     HISTORY.put(playerId, PilotHistory.failed(
                             active.prepared, List.of(), "start failed: " + failure.getMessage()));
@@ -242,6 +360,10 @@ public final class PilotDeploymentCommand {
                                 "Pilot execution FAILED before session: " + failure.getMessage()));
                     }
                 }
+                continue;
+            }
+            if (active.threeModeSession != null) {
+                tickThreeMode(playerId, active, player);
                 continue;
             }
             CreateV606GoalDrivenExecution.TickResult result = active.session.tick();
@@ -305,6 +427,94 @@ public final class PilotDeploymentCommand {
         }
     }
 
+    private static void tickThreeMode(
+            UUID playerId,
+            ActivePilot active,
+            ServerPlayer player) {
+        CreateV606ThreeModeExecution.TickResult result = active.threeModeSession.tick();
+        if (result instanceof CreateV606ThreeModeExecution.Progress progress) {
+            CreateV606GoalDrivenExecution.Phase phase = progress.createPhase()
+                    .orElse(CreateV606GoalDrivenExecution.Phase.BUILD);
+            if (active.lastPhase != phase) {
+                active.lastPhase = phase;
+                String line = "Pilot stage=" + phase + " task=" + progress.taskId()
+                        + " mode=" + active.mode.serializedName()
+                        + " elapsedTicks=" + progress.elapsedTicks();
+                if (player != null) {
+                    player.sendSystemMessage(Component.literal(line));
+                    player.displayClientMessage(Component.literal(line), true);
+                }
+                LOGGER.info("IWP_EXECUTION_PROGRESS {}", line);
+            }
+            if (player != null) {
+                persistTerminal(player.serverLevel(), playerId, active.prepared,
+                        PilotRecoverySavedData.Stage.FAILED,
+                        active.threeModeSession.journalsSnapshot(),
+                        "three-mode bounded progress; cleanup-only recovery mode="
+                                + active.mode.serializedName());
+            }
+            CreateV606GoalDrivenExecution.Phase hold = HOLD_TARGETS.get(playerId);
+            if (hold == phase) {
+                active.held = true;
+                HOLD_TARGETS.remove(playerId);
+            }
+            return;
+        }
+        ACTIVE.remove(playerId);
+        if (result instanceof CreateV606ThreeModeExecution.Completed completed) {
+            PilotHistory history = PilotHistory.completed(active.prepared, completed.process());
+            history.threeModeSession = active.threeModeSession;
+            history.mode = active.mode;
+            HISTORY.put(playerId, history);
+            if (player != null) {
+                persistCompleted(player.serverLevel(), playerId, active.prepared,
+                        completed.process(), "three-mode completion mode="
+                                + active.mode.serializedName());
+            }
+            String line = "Pilot COMPLETE target=" + completed.process().target()
+                    + " mode=" + active.mode.serializedName()
+                    + " required=" + completed.process().requiredQuantity()
+                    + " observed=" + completed.process().observedQuantity()
+                    + " tasks=" + completed.taskResults().size()
+                    + " workers=" + completed.workerIds().size()
+                    + " botRoles=" + (completed.workerActivities().isEmpty()
+                    ? "none"
+                    : completed.workerActivities().stream()
+                            .map(value -> value.role() + ":assignments="
+                                    + value.assignmentsStarted() + ":final="
+                                    + value.finalPosition())
+                            .collect(java.util.stream.Collectors.joining(",")))
+                    + " botOverlap=" + (completed.workerActivities().stream()
+                    .map(CreateV606ThreeModeExecution.WorkerActivity::finalPosition)
+                    .distinct().count() != completed.workerActivities().size())
+                    + " reload=" + completed.reloadReconciled()
+                    + " cleanupRequired=true";
+            if (player != null) {
+                player.sendSystemMessage(Component.literal(line));
+                player.displayClientMessage(Component.literal(
+                        "Pilot COMPLETE — inspect output, then cleanup"), true);
+            }
+            LOGGER.info("IWP_EXECUTION_COMPLETE {}", line);
+            return;
+        }
+        CreateV606ThreeModeExecution.Failed failed =
+                (CreateV606ThreeModeExecution.Failed) result;
+        List<WorldChangeJournal> journals = active.threeModeSession.journalsSnapshot();
+        PilotHistory history = PilotHistory.failed(
+                active.prepared, journals, failed.detail());
+        history.mode = active.mode;
+        HISTORY.put(playerId, history);
+        if (player != null) {
+            persistTerminal(player.serverLevel(), playerId, active.prepared,
+                    PilotRecoverySavedData.Stage.FAILED, journals,
+                    "three-mode failed mode=" + active.mode.serializedName()
+                            + ": " + failed.detail());
+            player.sendSystemMessage(Component.literal(
+                    "Pilot FAILED mode=" + active.mode.serializedName()
+                            + " detail=" + failed.detail()));
+        }
+    }
+
     private static ArgumentBuilder<CommandSourceStack, ?> orientation(
             String literal, QuarterTurn orientation, boolean dryRun) {
         return Commands.literal(literal).executes(context -> execute(context.getSource(),
@@ -316,15 +526,16 @@ public final class PilotDeploymentCommand {
     private static int start(
             CommandSourceStack source,
             ResourceLocation targetLocation,
-            long quantity) {
+            long quantity,
+            ExecutionMode mode) {
         PilotRegionCommand.ConfirmedPilotContext context =
                 PilotRegionCommand.confirmedContext(source).orElse(null);
         if (context == null) return 0;
         ResourceId target = ResourceId.parse(targetLocation.toString());
-        TargetSpec targetSpec = TargetSpec.supported(target, quantity);
+        TargetSpec targetSpec = TargetSpec.supported(source.getLevel(), target, quantity);
         if (targetSpec == null) {
             return refuse(source, context, WritableTestWorldFailureCode.PILOT_TARGET_UNSUPPORTED,
-                    "Only minecraft:gravel x3 and create:iron_sheet x2 are enabled");
+                    "Target/quantity is outside the bounded pilot capability allowlist");
         }
         UUID player = context.player().getUUID();
         if (ACTIVE.containsKey(player)) {
@@ -358,12 +569,12 @@ public final class PilotDeploymentCommand {
         }
         PREPARED.remove(player);
         HISTORY.remove(player);
-        ACTIVE.put(player, new ActivePilot(prepared, 60));
+        ACTIVE.put(player, new ActivePilot(prepared, 60, mode));
         String line = "Pilot start accepted countdown=3s target=" + target + " quantity="
-                + quantity + " orientation=" + prepared.orientation + " previewHash="
+                + quantity + " mode=" + mode.serializedName()
+                + " orientation=" + prepared.orientation + " previewHash="
                 + prepared.previewHash + " mutationBudget=" + prepared.mutationBudget
-                + " materials=" + prepared.targetSpec.input + "x"
-                + prepared.targetSpec.inputQuantity + " backup="
+                + " materials=" + prepared.targetSpec.inputs + " backup="
                 + prepared.backupIdentity + " region="
                 + format(prepared.affectedBounds)
                 + " playerInventoryRead=false formalWorldExecutable=false";
@@ -386,12 +597,13 @@ public final class PilotDeploymentCommand {
                         WritableTestWorldFailureCode.TEST_WORLD_IDENTITY_MISMATCH,
                         "Active pilot belongs to another world or dimension");
             }
-            String phase = active.session == null
+            String phase = !active.started()
                     ? "COUNTDOWN" : String.valueOf(active.lastPhase == null
                             ? CreateV606GoalDrivenExecution.Phase.BUILD : active.lastPhase);
             source.sendSuccess(() -> Component.literal("Pilot status state=RUNNING phase=" + phase
                     + " countdownTicks=" + active.countdownTicks + " target="
                     + active.prepared.target + " quantity=" + active.prepared.quantity
+                    + " mode=" + active.mode.serializedName()
                     + " previewHash=" + active.prepared.previewHash
                     + " backup=" + active.prepared.backupIdentity
                     + " buffer=" + active.prepared.resourceBuffer
@@ -457,17 +669,24 @@ public final class PilotDeploymentCommand {
                     "Active pilot belongs to another world or dimension");
         }
         PilotHistory history;
-        if (active.session == null) {
+        if (!active.started()) {
             history = PilotHistory.pendingCancelled(active.prepared);
+        } else if (active.threeModeSession != null) {
+            history = PilotHistory.cancelled(active.prepared,
+                    active.threeModeSession.cancel(
+                            ResourceId.parse("steve_industrial:pilot/user_cancelled")));
         } else {
             CreateV606GoalDrivenExecution.Cancellation cancellation = active.session.cancel(
                     ResourceId.parse("steve_industrial:pilot/user_cancelled"));
             history = PilotHistory.cancelled(active.prepared, cancellation.journals());
         }
+        history.mode = active.mode;
         HISTORY.put(player, history);
         persistTerminal(source.getLevel(), player, active.prepared,
                 PilotRecoverySavedData.Stage.CANCELLED, history.journals,
-                "user cancellation");
+                active.mode == ExecutionMode.DIRECT ? "user cancellation"
+                        : "user cancellation three-mode mode="
+                                + active.mode.serializedName());
         String line = "Pilot CANCELLED session="
                 + active.prepared.execution.executionReadyPlan().sessionId()
                 + " journals=" + history.journals.size()
@@ -502,6 +721,7 @@ public final class PilotDeploymentCommand {
                             journalPositions(persisted.journals()));
                     history = new PilotHistory(recovered, persisted.journals(),
                             persisted.stage().name(), persisted.detail(), false);
+                    history.mode = persistedMode(persisted.detail());
                     HISTORY.put(player, history);
                 } catch (PilotRefusal refusal) {
                     return refuseCurrent(source, context, null,
@@ -522,6 +742,23 @@ public final class PilotDeploymentCommand {
                     "Cleanup history belongs to another world or dimension");
         }
         Set<BlockPos3i> owned = history.prepared.ownedPositions;
+        BlockPos deliveryBlock = block(history.prepared.deliveryBuffer);
+        if (history.mode != ExecutionMode.DIRECT
+                && (!source.getLevel().hasChunkAt(deliveryBlock)
+                || (!source.getLevel().getBlockState(deliveryBlock).isAir()
+                && !source.getLevel().getBlockState(deliveryBlock).is(Blocks.CHEST)))) {
+            return refuseCurrent(source, context, history.prepared,
+                    WritableTestWorldFailureCode.PILOT_CLEANUP_UNSAFE,
+                    "Delivery buffer is no longer the session-owned chest or air");
+        }
+        Optional<String> unsafeDelivery = history.mode == ExecutionMode.DIRECT
+                ? Optional.empty()
+                : unsafeDeliveryContents(source.getLevel(), history.prepared);
+        if (unsafeDelivery.isPresent()) {
+            return refuseCurrent(source, context, history.prepared,
+                    WritableTestWorldFailureCode.PILOT_CLEANUP_UNSAFE,
+                    unsafeDelivery.orElseThrow());
+        }
         var plan = CreateV606PilotCleanupService.preview(
                 source.getLevel(), history.journals, owned, history.prepared.resourceBuffer);
         if (!plan.safe()) {
@@ -531,9 +768,13 @@ public final class PilotDeploymentCommand {
         }
         if (previewOnly) {
             history.cleanupPreview = true;
+            int deliveryRemoval = history.mode != ExecutionMode.DIRECT
+                    && source.getLevel().getBlockState(deliveryBlock).is(Blocks.CHEST)
+                    ? 1 : 0;
             String line = "Pilot cleanup preview PASS session="
                     + history.prepared.execution.executionReadyPlan().sessionId()
-                    + " remove=" + plan.toRemove().size() + " alreadyClean="
+                    + " remove=" + (plan.toRemove().size() + deliveryRemoval)
+                    + " alreadyClean="
                     + plan.alreadyClean().size() + " journalOwnedOnly=true worldMutation=false";
             source.sendSuccess(() -> Component.literal(line), false);
             return 1;
@@ -543,6 +784,15 @@ public final class PilotDeploymentCommand {
                     WritableTestWorldFailureCode.PILOT_PREVIEW_REQUIRED,
                     "Run pilot cleanup preview immediately before cleanup");
         }
+        if (history.threeModeSession != null) {
+            CreateV606ThreeModeExecution.CleanupReport threeCleanup =
+                    history.threeModeSession.cleanup();
+            if (threeCleanup.remainingPositions() != 0) {
+                return refuseCurrent(source, context, history.prepared,
+                        WritableTestWorldFailureCode.PILOT_CLEANUP_UNSAFE,
+                        "Three-mode final snapshot changed before cleanup: " + threeCleanup);
+            }
+        }
         var result = CreateV606PilotCleanupService.execute(
                 source.getLevel(), history.journals, owned, history.prepared.resourceBuffer);
         if (!result.success()) {
@@ -550,13 +800,32 @@ public final class PilotDeploymentCommand {
                     WritableTestWorldFailureCode.PILOT_CLEANUP_UNSAFE,
                     result.detail());
         }
+        int deliveryRemoved = 0;
+        if (history.mode != ExecutionMode.DIRECT
+                && source.getLevel().getBlockState(deliveryBlock).is(Blocks.CHEST)) {
+            source.getLevel().setBlockAndUpdate(deliveryBlock, Blocks.AIR.defaultBlockState());
+            if (!source.getLevel().getBlockState(deliveryBlock).isAir()) {
+                return refuseCurrent(source, context, history.prepared,
+                        WritableTestWorldFailureCode.PILOT_CLEANUP_UNSAFE,
+                        "Delivery buffer cleanup readback is not air");
+            }
+            deliveryRemoved = 1;
+        }
+        int workersRemoved = history.mode == ExecutionMode.DIRECT ? 0
+                : CreateV606ThreeModeExecution.cleanupWorkers(
+                        source.getLevel(), new CreateV606ThreeModeExecution.TestRegion(
+                                history.prepared.authorizedRegion.minimum(),
+                                history.prepared.authorizedRegion.maximum()));
         history.cleaned = true;
         history.status = "CLEANED";
-        history.detail = "removed=" + result.removed();
+        int totalRemoved = result.removed() + deliveryRemoved;
+        history.detail = "removed=" + totalRemoved + " workers=" + workersRemoved;
         PilotRecoverySavedData.forLevel(source.getLevel()).remove(player);
         source.sendSuccess(() -> Component.literal("Pilot cleanup COMPLETE removed="
-                + result.removed() + " journalOwnedOnly=true unknownBlocksRemoved=0"), false);
-        LOGGER.info("IWP_CLEANUP_COMPLETE removed={} session={}", result.removed(),
+                + totalRemoved + " workers=" + workersRemoved
+                + " journalOwnedOnly=true unknownBlocksRemoved=0"), false);
+        LOGGER.info("IWP_CLEANUP_COMPLETE removed={} workers={} session={}", totalRemoved,
+                workersRemoved,
                 history.prepared.execution.executionReadyPlan().sessionId());
         return 1;
     }
@@ -767,6 +1036,13 @@ public final class PilotDeploymentCommand {
                     + " executionRestarted=false cleanupAvailable=true"), false);
             return 1;
         }
+        TargetSpec persistedTarget = TargetSpec.supported(
+                source.getLevel(), persisted.target(), persisted.quantity());
+        if (persistedTarget != null && persistedTarget.preparedSiteRequired) {
+            return refuseCurrent(source, context, null,
+                    WritableTestWorldFailureCode.PILOT_RECOVERY_UNSAFE,
+                    "Prepared-site production recovery requires a fresh exact site authorization; cleanup remains available");
+        }
         try {
             if (persisted.mode() == PilotRecoverySavedData.RecoveryMode.SAFE_CHECKPOINT) {
                 RecoveryCheckpoint checkpoint = RecoveryCheckpointCodec.decode(persisted.checkpoint());
@@ -774,7 +1050,8 @@ public final class PilotDeploymentCommand {
                         Set.copyOf(checkpoint.journal().modifiedPositions()));
                 CreateV606GoalDrivenExecution.ReconcileResult reconciled =
                         CreateV606GoalDrivenExecution.reconcileReload(source.getLevel(),
-                                recovered.execution.executionReadyPlan(), checkpoint);
+                                recovered.execution.executionReadyPlan(), checkpoint,
+                                recovered.execution.executionMetadata());
                 if (!(reconciled instanceof CreateV606GoalDrivenExecution.ReconcileReady ready)) {
                     var refused = (CreateV606GoalDrivenExecution.ReconcileRefused) reconciled;
                     return refuseCurrent(source, context, recovered,
@@ -783,7 +1060,8 @@ public final class PilotDeploymentCommand {
                 }
                 var started = CreateV606GoalDrivenExecution.resume(
                         source.getLevel(), recovered.execution.executionReadyPlan(),
-                        recovered.execution.runtime(), recovered.resourceBuffer, ready.resumable());
+                        recovered.execution.runtime(), recovered.resourceBuffer,
+                        ready.resumable(), recovered.execution.executionMetadata());
                 if (!(started instanceof CreateV606GoalDrivenExecution.Started success)) {
                     var rejected = (CreateV606GoalDrivenExecution.Rejected) started;
                     return refuseCurrent(source, context, recovered,
@@ -812,7 +1090,7 @@ public final class PilotDeploymentCommand {
                 var verified = CreateV606GoalDrivenExecution.recoverVerify(
                         source.getLevel(), recovered.execution.executionReadyPlan(),
                         recovered.execution.runtime(), recovered.resourceBuffer,
-                        persisted.journals());
+                        persisted.journals(), recovered.execution.executionMetadata());
                 if (!(verified instanceof CreateV606GoalDrivenExecution.VerifyRecovered success)) {
                     var refused = (CreateV606GoalDrivenExecution.VerifyRecoveryRefused) verified;
                     return refuseCurrent(source, context, recovered,
@@ -857,18 +1135,19 @@ public final class PilotDeploymentCommand {
             ServerLevel level,
             PilotRecoverySavedData.RecoveryEntry persisted,
             Set<BlockPos3i> journalOwned) throws PilotRefusal {
-        TargetSpec target = TargetSpec.supported(persisted.target(), persisted.quantity());
+        TargetSpec target = TargetSpec.supported(level, persisted.target(), persisted.quantity());
         if (target == null) {
             throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_TARGET_UNSUPPORTED,
                     "Persisted target is not enabled");
         }
-        Map<ResourceId, Long> inputs = Map.of(target.input, target.inputQuantity);
+        Map<ResourceId, Long> inputs = target.inputs;
         var planned = CreateV606GoalDrivenPlanner.planForRecovery(
                 level, persisted.target(), persisted.quantity(), inputs,
                 pilotAnchor(persisted.region(), target.physicalModuleCount,
                         persisted.orientation()),
                 persisted.orientation(), persisted.rootSessionId(),
-                inputs, ExecutionWorldClassification.ISOLATED_REPOSITORY_TEST, journalOwned);
+                inputs, ExecutionWorldClassification.ISOLATED_REPOSITORY_TEST, journalOwned,
+                target.materialConstraints);
         if (!(planned instanceof CreateV606GoalDrivenPlanner.Ready ready)) {
             var failure = (CreateV606GoalDrivenPlanner.Failure) planned;
             throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_RECOVERY_UNSAFE,
@@ -892,15 +1171,100 @@ public final class PilotDeploymentCommand {
     private static void begin(ServerLevel level, ActivePilot active) throws Exception {
         revalidateUnmodified(level, active.prepared);
         seedBuffer(level, active.prepared);
-        var started = CreateV606GoalDrivenExecution.begin(
-                level, active.prepared.execution.executionReadyPlan(),
-                active.prepared.execution.runtime(), active.prepared.resourceBuffer);
+        if (active.mode != ExecutionMode.DIRECT) {
+            seedEmptyBuffer(level, active.prepared.deliveryBuffer);
+            Set<BlockPos3i> excluded = new LinkedHashSet<>(active.prepared.ownedPositions);
+            excluded.add(active.prepared.resourceBuffer);
+            excluded.add(active.prepared.deliveryBuffer);
+            List<BlockPos3i> workerStarts = findWorkerStarts(
+                    level, active.prepared.authorizedRegion, excluded);
+            CreateV606ThreeModeExecution.TestRegion region =
+                    new CreateV606ThreeModeExecution.TestRegion(
+                            active.prepared.authorizedRegion.minimum(),
+                            active.prepared.authorizedRegion.maximum());
+            CreateV606ThreeModeExecution.StartResult started =
+                    active.prepared.siteAuthorization == null
+                            ? CreateV606ThreeModeExecution.start(
+                                    level, active.prepared.execution.executionReadyPlan(),
+                                    active.prepared.execution.runtime(),
+                                    active.prepared.resourceBuffer,
+                                    active.prepared.deliveryBuffer, active.mode, region,
+                                    workerStarts,
+                                    active.prepared.execution.executionMetadata())
+                            : CreateV606ThreeModeExecution.start(
+                                    level, active.prepared.siteAuthorization,
+                                    active.prepared.worldIdentity,
+                                    active.prepared.execution.runtime(),
+                                    active.prepared.resourceBuffer,
+                                    active.prepared.deliveryBuffer, active.mode, region,
+                                    workerStarts,
+                                    active.prepared.execution.executionMetadata());
+            if (!(started instanceof CreateV606ThreeModeExecution.Started success)) {
+                var rejected = (CreateV606ThreeModeExecution.Rejected) started;
+                cleanupBuffer(level, active.prepared.deliveryBuffer);
+                cleanupBuffer(level, active.prepared.resourceBuffer);
+                throw new IllegalStateException(rejected.code() + ": " + rejected.detail());
+            }
+            active.threeModeSession = success.session();
+            active.lastPhase = CreateV606GoalDrivenExecution.Phase.BUILD;
+            return;
+        }
+        CreateV606GoalDrivenExecution.StartResult started =
+                active.prepared.siteAuthorization == null
+                        ? CreateV606GoalDrivenExecution.begin(
+                                level, active.prepared.execution.executionReadyPlan(),
+                                active.prepared.execution.runtime(),
+                                active.prepared.resourceBuffer,
+                                active.prepared.execution.executionMetadata())
+                        : CreateV606GoalDrivenExecution.begin(
+                                level, active.prepared.siteAuthorization,
+                                active.prepared.worldIdentity,
+                                active.prepared.execution.runtime(),
+                                active.prepared.resourceBuffer,
+                                active.prepared.execution.executionMetadata());
         if (!(started instanceof CreateV606GoalDrivenExecution.Started success)) {
             var rejected = (CreateV606GoalDrivenExecution.Rejected) started;
             throw new IllegalStateException(rejected.code() + ": " + rejected.detail());
         }
         active.session = success.session();
         active.lastPhase = CreateV606GoalDrivenExecution.Phase.BUILD;
+    }
+
+    private static void seedEmptyBuffer(ServerLevel level, BlockPos3i position) {
+        BlockPos block = block(position);
+        if (!level.setBlockAndUpdate(block, Blocks.CHEST.defaultBlockState())
+                || !(level.getBlockEntity(block) instanceof ChestBlockEntity chest)) {
+            throw new IllegalStateException(
+                    "PILOT_MATERIAL_SOURCE_UNAVAILABLE: delivery chest creation failed");
+        }
+        chest.clearContent();
+        chest.setChanged();
+    }
+
+    private static List<BlockPos3i> findWorkerStarts(
+            ServerLevel level,
+            DeploymentBoundingBox bounds,
+            Set<BlockPos3i> excluded) {
+        List<BlockPos3i> starts = new ArrayList<>();
+        for (int y = bounds.minimum().y(); y <= bounds.maximum().y() && starts.size() < 2; y++) {
+            for (int z = bounds.minimum().z(); z <= bounds.maximum().z() && starts.size() < 2; z++) {
+                for (int x = bounds.minimum().x(); x <= bounds.maximum().x() && starts.size() < 2; x++) {
+                    BlockPos3i candidate = new BlockPos3i(x, y, z);
+                    if (excluded.contains(candidate)) continue;
+                    BlockPos feet = block(candidate);
+                    if (level.hasChunkAt(feet) && level.getBlockState(feet).isAir()
+                            && level.getBlockState(feet.above()).isAir()
+                            && !level.getBlockState(feet.below()).isAir()) {
+                        starts.add(candidate);
+                    }
+                }
+            }
+        }
+        if (starts.size() != 2) {
+            throw new IllegalStateException(
+                    "PILOT_BOT_START_UNAVAILABLE: two bounded walkable cells are required");
+        }
+        return List.copyOf(starts);
     }
 
     private static void seedBuffer(ServerLevel level, PreparedPilot prepared) {
@@ -912,13 +1276,21 @@ public final class PilotDeploymentCommand {
                 || !(level.getBlockEntity(position) instanceof ChestBlockEntity chest)) {
             throw new IllegalStateException("PILOT_MATERIAL_SOURCE_UNAVAILABLE: chest creation failed");
         }
-        Item item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(
-                prepared.targetSpec.input.namespace(), prepared.targetSpec.input.path()));
-        if (item == null) {
-            cleanupBuffer(level, prepared.resourceBuffer);
-            throw new IllegalStateException("PILOT_MATERIAL_SOURCE_UNAVAILABLE: input is unregistered");
+        int slot = 0;
+        for (Map.Entry<ResourceId, Long> input : prepared.targetSpec.inputs.entrySet().stream()
+                .sorted(java.util.Comparator.comparing(value -> value.getKey().toString()))
+                .toList()) {
+            Item item = ForgeRegistries.ITEMS.getValue(
+                    ResourceLocation.fromNamespaceAndPath(
+                            input.getKey().namespace(), input.getKey().path()));
+            if (item == null || input.getValue() > item.getDefaultInstance().getMaxStackSize()) {
+                cleanupBuffer(level, prepared.resourceBuffer);
+                throw new IllegalStateException(
+                        "PILOT_MATERIAL_SOURCE_UNAVAILABLE: bounded input is unavailable "
+                                + input.getKey());
+            }
+            chest.setItem(slot++, new ItemStack(item, Math.toIntExact(input.getValue())));
         }
-        chest.setItem(0, new ItemStack(item, Math.toIntExact(prepared.targetSpec.inputQuantity)));
         chest.setChanged();
     }
 
@@ -927,6 +1299,34 @@ public final class PilotDeploymentCommand {
         if (level.getBlockState(block).is(Blocks.CHEST)) {
             level.setBlockAndUpdate(block, Blocks.AIR.defaultBlockState());
         }
+    }
+
+    private static Optional<String> unsafeDeliveryContents(
+            ServerLevel level,
+            PreparedPilot prepared) {
+        if (level.getBlockState(block(prepared.deliveryBuffer)).isAir()) {
+            return Optional.empty();
+        }
+        if (!(level.getBlockEntity(block(prepared.deliveryBuffer))
+                instanceof ChestBlockEntity chest)) {
+            return Optional.of("Delivery buffer chest entity is unavailable");
+        }
+        int total = 0;
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            ItemStack stack = chest.getItem(slot);
+            if (stack.isEmpty()) continue;
+            ResourceLocation item = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            if (item == null) return Optional.of("Delivery buffer contains an unregistered item");
+            ResourceId identity = ResourceId.parse(item.toString());
+            if (!identity.equals(prepared.target)
+                    && !prepared.targetSpec.inputs.containsKey(identity)) {
+                return Optional.of("Delivery buffer contains non-session item " + identity
+                        + "; remove it before cleanup");
+            }
+            total = Math.addExact(total, stack.getCount());
+        }
+        return total <= 64 ? Optional.empty()
+                : Optional.of("Delivery buffer item count exceeds the bounded session stack");
     }
 
     private static void revalidateUnmodified(ServerLevel level, PreparedPilot prepared)
@@ -944,6 +1344,12 @@ public final class PilotDeploymentCommand {
                 || level.getBlockEntity(buffer) != null) {
             throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_MATERIAL_SOURCE_UNAVAILABLE,
                     "TEST_ONLY resource buffer position changed");
+        }
+        BlockPos delivery = block(prepared.deliveryBuffer);
+        if (!level.hasChunkAt(delivery) || !level.getBlockState(delivery).isAir()
+                || level.getBlockEntity(delivery) != null) {
+            throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_MATERIAL_SOURCE_UNAVAILABLE,
+                    "TEST_ONLY delivery buffer position changed");
         }
     }
 
@@ -970,6 +1376,16 @@ public final class PilotDeploymentCommand {
         return new BlockPos(position.x(), position.y(), position.z());
     }
 
+    private static QuarterTurn quarterTurn(
+            dev.stevecreate.agent.core.siteprep.SiteFacing facing) {
+        return switch (facing) {
+            case NORTH -> QuarterTurn.ZERO;
+            case EAST -> QuarterTurn.CLOCKWISE_90;
+            case SOUTH -> QuarterTurn.CLOCKWISE_180;
+            case WEST -> QuarterTurn.CLOCKWISE_270;
+        };
+    }
+
     private static int execute(
             CommandSourceStack source,
             ResourceLocation targetLocation,
@@ -980,10 +1396,10 @@ public final class PilotDeploymentCommand {
                 PilotRegionCommand.confirmedContext(source).orElse(null);
         if (context == null) return 0;
         ResourceId target = ResourceId.parse(targetLocation.toString());
-        TargetSpec targetSpec = TargetSpec.supported(target, quantity);
+        TargetSpec targetSpec = TargetSpec.supported(source.getLevel(), target, quantity);
         if (targetSpec == null) {
             return refuse(source, context, WritableTestWorldFailureCode.PILOT_TARGET_UNSUPPORTED,
-                    "Only minecraft:gravel x3 and create:iron_sheet x2 are enabled");
+                    "Target/quantity is outside the bounded pilot capability allowlist");
         }
         UUID playerId = context.player().getUUID();
         PreparedPilot prepared = PREPARED.get(playerId);
@@ -1008,7 +1424,7 @@ public final class PilotDeploymentCommand {
                 + " orientation=" + orientation + " previewHash="
                 + prepared.previewHash + " bounds=" + format(prepared.affectedBounds)
                 + " placements=" + prepared.placementCount
-                + " input=" + targetSpec.input + "x" + targetSpec.inputQuantity
+                + " inputs=" + targetSpec.inputs
                 + " stress=" + prepared.stressDemand
                 + " mutationBudget=" + prepared.mutationBudget
                 + " backup=" + prepared.backupIdentity
@@ -1030,17 +1446,55 @@ public final class PilotDeploymentCommand {
         Instant now = Instant.now();
         BlockPos3i anchor = pilotAnchor(
                 context.confirmation().bounds(), target.physicalModuleCount, orientation);
+        SitePreparationCommand.PreparedExecutionContext site = null;
+        if (target.preparedSiteRequired) {
+            site = SitePreparationCommand.preparedExecutionContext(context.player()).orElse(null);
+            if (site == null) {
+                throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_PREVIEW_REQUIRED,
+                        "Phase IV production requires a fresh PreparedConstructionSite in this world");
+            }
+            if (!site.prepared().anchor().position().equals(anchor)
+                    || quarterTurn(site.prepared().facing()) != orientation) {
+                throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_PREVIEW_REQUIRED,
+                        "Prepared site anchor/facing must match the deterministic pilot plan anchor "
+                                + anchor + " orientation=" + orientation);
+            }
+        }
         ResourceId sessionId = ResourceId.parse("steve_industrial:pilot/"
                 + context.player().getUUID().toString().replace("-", "") + "/"
                 + UUID.randomUUID().toString().replace("-", ""));
-        Map<ResourceId, Long> inputs = Map.of(target.input, target.inputQuantity);
+        Map<ResourceId, Long> inputs = target.inputs;
         var planned = CreateV606GoalDrivenPlanner.plan(
                 level, target.target, target.quantity, inputs, anchor, orientation,
-                sessionId, inputs, ExecutionWorldClassification.ISOLATED_REPOSITORY_TEST);
+                sessionId, inputs, ExecutionWorldClassification.ISOLATED_REPOSITORY_TEST,
+                target.materialConstraints);
         if (!(planned instanceof CreateV606GoalDrivenPlanner.Ready execution)) {
             var failure = (CreateV606GoalDrivenPlanner.Failure) planned;
             throw new PilotRefusal(WritableTestWorldFailureCode.REGION_INSUFFICIENT_SPACE,
                     failure.code() + ": " + failure.detail());
+        }
+        PreparedSiteExecutionAuthorization siteAuthorization = null;
+        if (site != null) {
+            PreparedSiteExecutionGate.PlanningEvidence planning =
+                    new PreparedSiteExecutionGate.PlanningEvidence(
+                            site.prepared().worldIdentity(), site.prepared().dimension(),
+                            site.prepared().preparedSiteIdentity(),
+                            site.prepared().cleanSiteSnapshotHash(),
+                            execution.executionReadyPlan().physicalPlan().id(),
+                            execution.executionReadyPlan().physicalPlan().candidate()
+                                    .snapshotFingerprint(),
+                            now, true,
+                            "forge1201:player-visible-authoritative-post-clearance-planning-snapshot");
+            var gated = new PreparedSiteExecutionGate().authorize(
+                    site.prepared(), site.selection(), execution.executionReadyPlan(), planning,
+                    now);
+            if (!(gated instanceof PreparedSiteExecutionGate.Authorized authorized)) {
+                var refused = (PreparedSiteExecutionGate.Refused) gated;
+                throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_PREVIEW_REQUIRED,
+                        "Prepared-site execution gate refused " + refused.failure() + ": "
+                                + refused.detail());
+            }
+            siteAuthorization = authorized.authorization();
         }
 
         Path game = Path.of(System.getProperty("user.dir")).toRealPath();
@@ -1158,13 +1612,17 @@ public final class PilotDeploymentCommand {
         }
         BlockPos3i resourceBuffer = findResourceBuffer(
                 level, context.confirmation().bounds(), ownedPositions(preview), anchor);
+        BlockPos3i deliveryBuffer = findDeliveryBuffer(
+                level, context.confirmation().bounds(), ownedPositions(preview), resourceBuffer);
         return new PreparedPilot(
                 context.confirmation().confirmationIdentity(), target.target, target.quantity,
                 orientation, target, execution, success.plan(), preview, backup.plan,
-                mutationBudget, resourceBuffer, context.identity().value(), dimension,
+                mutationBudget, resourceBuffer, deliveryBuffer,
+                context.identity().value(), dimension,
                 context.confirmation().bounds(), context.confirmation().regionHash(),
                 context.identity().worldFingerprint(), context.confirmation().worldFingerprint(),
-                context.confirmation().expiresAt().toEpochMilli(), false);
+                context.confirmation().expiresAt().toEpochMilli(), false,
+                siteAuthorization);
     }
 
     private static Map<RegionAuthorizedOperation, PermissionEvidence> permissions(
@@ -1387,6 +1845,33 @@ public final class PilotDeploymentCommand {
                 "No isolated air cell is available for the bounded TEST_ONLY resource chest");
     }
 
+    private static BlockPos3i findDeliveryBuffer(
+            ServerLevel level,
+            DeploymentBoundingBox bounds,
+            Set<BlockPos3i> owned,
+            BlockPos3i source) throws PilotRefusal {
+        BlockPos3i candidate = recoveredDeliveryBuffer(bounds, owned, source);
+        BlockPos block = block(candidate);
+        if (level.hasChunkAt(block) && level.getBlockState(block).isAir()
+                && level.getBlockEntity(block) == null) return candidate;
+        throw new PilotRefusal(WritableTestWorldFailureCode.PILOT_MATERIAL_SOURCE_UNAVAILABLE,
+                "The deterministic bounded delivery chest cell is unavailable");
+    }
+
+    private static BlockPos3i recoveredDeliveryBuffer(
+            DeploymentBoundingBox bounds,
+            Set<BlockPos3i> owned,
+            BlockPos3i source) {
+        List<BlockPos3i> candidates = List.of(
+                source.translate(-1, 0, 0), source.translate(1, 0, 0),
+                source.translate(0, 0, -1), source.translate(0, 0, 1));
+        for (BlockPos3i candidate : candidates) {
+            if (bounds.contains(candidate) && !owned.contains(candidate)) return candidate;
+        }
+        throw new IllegalStateException(
+                "Persisted pilot has no deterministic in-region delivery chest cell");
+    }
+
     private static boolean contains(DeploymentBoundingBox outer, DeploymentBoundingBox inner) {
         return outer.contains(inner.minimum()) && outer.contains(inner.maximum());
     }
@@ -1452,6 +1937,14 @@ public final class PilotDeploymentCommand {
                 + bounds.maximum().z();
     }
 
+    private static ExecutionMode persistedMode(String detail) {
+        if (detail != null && detail.contains("three-mode")) {
+            if (detail.contains("mode=bots")) return ExecutionMode.BOTS;
+            return ExecutionMode.HYBRID;
+        }
+        return ExecutionMode.DIRECT;
+    }
+
     private static String sha256(String value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -1465,15 +1958,27 @@ public final class PilotDeploymentCommand {
 
     private static final class ActivePilot {
         private final PreparedPilot prepared;
+        private final ExecutionMode mode;
         private int countdownTicks;
         private CreateV606GoalDrivenExecution.Session session;
+        private CreateV606ThreeModeExecution.Session threeModeSession;
         private CreateV606GoalDrivenExecution.Phase lastPhase;
         private boolean held;
 
-        private ActivePilot(PreparedPilot prepared, int countdownTicks) {
+        private ActivePilot(
+                PreparedPilot prepared,
+                int countdownTicks,
+                ExecutionMode mode) {
             this.prepared = prepared;
             this.countdownTicks = countdownTicks;
+            this.mode = mode;
         }
+
+        private ActivePilot(PreparedPilot prepared, int countdownTicks) {
+            this(prepared, countdownTicks, ExecutionMode.DIRECT);
+        }
+
+        private boolean started() { return session != null || threeModeSession != null; }
     }
 
     private static final class PilotHistory {
@@ -1483,6 +1988,8 @@ public final class PilotDeploymentCommand {
         private String detail;
         private boolean cleanupPreview;
         private boolean cleaned;
+        private CreateV606ThreeModeExecution.Session threeModeSession;
+        private ExecutionMode mode = ExecutionMode.DIRECT;
 
         private PilotHistory(
                 PreparedPilot prepared,
@@ -1542,6 +2049,7 @@ public final class PilotDeploymentCommand {
         private final long stressDemand;
         private final int mutationBudget;
         private final BlockPos3i resourceBuffer;
+        private final BlockPos3i deliveryBuffer;
         private final String worldIdentity;
         private final String worldFingerprint;
         private final ResourceId dimension;
@@ -1549,6 +2057,7 @@ public final class PilotDeploymentCommand {
         private final String regionHash;
         private final String regionFingerprint;
         private final long authorityExpiresAt;
+        private final PreparedSiteExecutionAuthorization siteAuthorization;
         private boolean dryRunAcknowledged;
 
         private PreparedPilot(
@@ -1563,6 +2072,7 @@ public final class PilotDeploymentCommand {
                 BackupPlan backup,
                 int mutationBudget,
                 BlockPos3i resourceBuffer,
+                BlockPos3i deliveryBuffer,
                 String worldIdentity,
                 ResourceId dimension,
                 DeploymentBoundingBox authorizedRegion,
@@ -1570,7 +2080,8 @@ public final class PilotDeploymentCommand {
                 String worldFingerprint,
                 String regionFingerprint,
                 long authorityExpiresAt,
-                boolean dryRunAcknowledged) {
+                boolean dryRunAcknowledged,
+                PreparedSiteExecutionAuthorization siteAuthorization) {
             this.confirmationIdentity = confirmationIdentity;
             this.target = target;
             this.quantity = quantity;
@@ -1588,6 +2099,7 @@ public final class PilotDeploymentCommand {
             this.stressDemand = preview.stressDemand();
             this.mutationBudget = mutationBudget;
             this.resourceBuffer = resourceBuffer;
+            this.deliveryBuffer = deliveryBuffer;
             this.worldIdentity = worldIdentity;
             this.worldFingerprint = worldFingerprint;
             this.dimension = dimension;
@@ -1596,6 +2108,7 @@ public final class PilotDeploymentCommand {
             this.regionFingerprint = regionFingerprint;
             this.authorityExpiresAt = authorityExpiresAt;
             this.dryRunAcknowledged = dryRunAcknowledged;
+            this.siteAuthorization = siteAuthorization;
         }
 
         private PreparedPilot(
@@ -1619,6 +2132,8 @@ public final class PilotDeploymentCommand {
             this.stressDemand = 0;
             this.mutationBudget = persisted.mutationBudget();
             this.resourceBuffer = persisted.resourceBuffer();
+            this.deliveryBuffer = recoveredDeliveryBuffer(
+                    persisted.region(), this.ownedPositions, this.resourceBuffer);
             this.worldIdentity = persisted.worldIdentity();
             this.worldFingerprint = persisted.worldFingerprint();
             this.dimension = persisted.dimension();
@@ -1627,6 +2142,7 @@ public final class PilotDeploymentCommand {
             this.regionFingerprint = persisted.regionFingerprint();
             this.authorityExpiresAt = persisted.authorityExpiresAt();
             this.dryRunAcknowledged = true;
+            this.siteAuthorization = null;
         }
 
         private boolean matchesCurrent(
@@ -1644,22 +2160,120 @@ public final class PilotDeploymentCommand {
         }
     }
 
-    private record TargetSpec(
+    record TargetSpec(
             ResourceId target,
             long quantity,
-            ResourceId input,
-            long inputQuantity,
-            int physicalModuleCount) {
-        private static TargetSpec supported(ResourceId target, long quantity) {
-            if (target.equals(ResourceId.parse("minecraft:gravel")) && quantity == 3) {
-                return new TargetSpec(
-                        target, quantity, ResourceId.parse("minecraft:andesite"), 3, 2);
+            Map<ResourceId, Long> inputs,
+            int physicalModuleCount,
+            boolean preparedSiteRequired,
+            MaterialConstraints materialConstraints) {
+        TargetSpec {
+            inputs = Map.copyOf(inputs);
+            java.util.Objects.requireNonNull(materialConstraints, "materialConstraints");
+            if (inputs.isEmpty() || inputs.size() > 9
+                    || inputs.values().stream().anyMatch(value -> value == null
+                            || value < 1 || value > 64)) {
+                throw new IllegalArgumentException("target inputs exceed the bounded chest contract");
             }
-            if (target.equals(ResourceId.parse("create:iron_sheet")) && quantity == 2) {
-                return new TargetSpec(
-                        target, quantity, ResourceId.parse("minecraft:iron_ingot"), 2, 1);
+        }
+
+        /**
+         * Whether the single-machine path would accept this goal as it stands today.
+         *
+         * <p>Exposed so a survey can report reachability honestly: classifying a goal as
+         * single-machine says nothing about whether anything can run it, and the list
+         * below is eleven hard-coded pairs rather than a general capability.</p>
+         */
+        static boolean accepts(Level level, ResourceId target, long quantity) {
+            return supported(level, target, quantity) != null;
+        }
+
+        /**
+         * The spec for a target, reviewed or derived from the live registry.
+         *
+         * <p>{@code level} may be null where only the reviewed eleven make sense — a
+         * recovery path replaying an order that was placed against them. Everywhere a
+         * player names a target it must be present, or a derivable goal is reported
+         * unsupported for no reason the player can see.</p>
+         */
+        static TargetSpec supported(Level level, ResourceId target, long quantity) {
+            GoalCatalogEntry entry = SingleMachineGoalResolver.resolve(level, target).orElse(null);
+            if (entry == null || quantity < 1 || quantity > maximumQuantity(entry)) {
+                return null;
             }
-            return null;
+            if (entry.outputPerBatch() < 1 || quantity % entry.outputPerBatch() != 0) {
+                return null;
+            }
+            long batches = quantity / entry.outputPerBatch();
+            Map<ResourceId, Long> inputs = new java.util.LinkedHashMap<>();
+            entry.inputsPerBatch().forEach((resource, perBatch) ->
+                    inputs.put(resource, Math.multiplyExact(perBatch, batches)));
+            for (Map.Entry<ResourceId, Long> fluid : entry.fluidInputsPerBatch().entrySet()) {
+                long millibuckets = Math.multiplyExact(fluid.getValue(), batches);
+                PlacementItemBinding.Bucket bucket = PlacementItemBinding
+                        .bucketsFor(fluid.getKey(), millibuckets)
+                        .orElse(null);
+                if (bucket == null) return null;
+                inputs.merge(bucket.item(), bucket.count(), Math::addExact);
+            }
+            return new TargetSpec(target, quantity, inputs, entry.physicalModuleCount(),
+                    entry.preparedSiteRequired(), constraintsFor(target));
+        }
+
+        /**
+         * Constraints the goal catalog cannot express.
+         *
+         * <p>{@link GoalCatalogEntry} carries no material constraints, so deriving a
+         * target spec purely from it would silently drop this one — the sand goal
+         * excludes sandstone, and losing that would let a crushing order consume the
+         * wrong rock while every other field still looked right.</p>
+         */
+        /**
+         * The largest order this target can be asked for.
+         *
+         * <p>What bounds an order is not which quantity somebody happened to verify but
+         * how long the recipe takes: the executor gives one step {@code MAX_WAIT_TICKS}
+         * to move all of the material, no matter how much there is.
+         *
+         * <p>The factor of two is measured, not chosen for comfort. Milling runs 200
+         * ticks a batch; twelve batches came to exactly the 2400-tick ceiling and timed
+         * out, six passed, and 2400 / (200 * 2) is six.
+         *
+         * <p>Reviewed entries are hand-written and state no duration, so they fall back
+         * on 200 — the same default the runtime census uses. That is the slowest recipe
+         * the live registry actually contains bar one, so six batches stays inside the
+         * ceiling for every one of them. It does raise gravel's limit from the three
+         * that was verified to the six that has now been verified, which is the point
+         * of the measurement.</p>
+         */
+        private static final long UNKNOWN_TICKS = 200L;
+        private static final long TIMEOUT_SAFETY_FACTOR = 2L;
+
+        private static long maximumQuantity(GoalCatalogEntry entry) {
+            // The current Basin/Mixer physical contract proves one exact pour and one
+            // batch. Do not let the general duration formula expose an unverified bulk
+            // fluid cycle merely because the recipe itself is fast.
+            if (!entry.fluidInputsPerBatch().isEmpty()) {
+                return entry.outputPerBatch();
+            }
+            long perBatch = Math.max(1, entry.processingTicks().orElse(UNKNOWN_TICKS));
+            long batches = GenericProcessSpec.MAX_WAIT_TICKS / (perBatch * TIMEOUT_SAFETY_FACTOR);
+            long quantity = Math.multiplyExact(Math.max(1, batches), entry.outputPerBatch());
+            return Math.max(1, Math.min(quantity, GoalCatalogEntry.MAX_STACK_BUDGET));
+        }
+
+        private static MaterialConstraints constraintsFor(ResourceId target) {
+            if (target.equals(ResourceId.parse("minecraft:sand"))) {
+                return new MaterialConstraints(
+                        Set.of(ResourceId.parse("minecraft:sandstone")), Map.of());
+            }
+            return MaterialConstraints.none();
+        }
+
+        private static TargetSpec phaseIv(
+                ResourceId target, Map<ResourceId, Long> inputs) {
+            return new TargetSpec(
+                    target, 1, inputs, 1, true, MaterialConstraints.none());
         }
     }
 

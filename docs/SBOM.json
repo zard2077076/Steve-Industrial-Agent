@@ -1,0 +1,21 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "Steve Industrial Agent",
+      "version": "0.1.0-alpha.1",
+      "licenses": [{"license": {"id": "MIT"}}]
+    }
+  },
+  "components": [
+    {"type": "framework", "name": "Minecraft Forge", "version": "47.4.0", "scope": "required"},
+    {"type": "library", "name": "Create", "version": "6.0.6", "scope": "optional"},
+    {"type": "library", "name": "Ponder", "version": "1.0.80", "scope": "optional"},
+    {"type": "library", "name": "Flywheel", "version": "1.0.4", "scope": "optional"},
+    {"type": "library", "name": "Registrate", "version": "MC1.20-1.3.3", "scope": "optional"},
+    {"type": "library", "name": "MixinExtras", "version": "0.4.1", "scope": "optional"}
+  ]
+}

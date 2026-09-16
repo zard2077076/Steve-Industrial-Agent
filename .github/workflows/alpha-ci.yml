@@ -2,9 +2,7 @@ name: Alpha CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,54 +24,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.4"
-      - name: Public-source privacy scan
+      - name: Privacy and history scan
         shell: pwsh
-        run: |
-          $tracked = git ls-files
-          $patterns = @(
-            '[A-Za-z]:[\\/]Users[\\/]',
-            '[A-Za-z]:[\\/]PCL2(?:[\\/]|$)',
-            'gh[opurs]_[A-Za-z0-9_]{20,}',
-            'github_pat_[A-Za-z0-9_]{20,}',
-            'AKIA[0-9A-Z]{16}',
-            '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'
-          )
-          $hits = foreach ($path in $tracked) {
-            if ($path -match '\.(?:jar|png|jpg|jpeg|gif|ico|zip|gz)$') { continue }
-            $line = 0
-            foreach ($text in [System.IO.File]::ReadLines((Join-Path $PWD $path))) {
-              $line++
-              foreach ($pattern in $patterns) {
-                if ($text -match $pattern) { "$path`:$line" }
-              }
-            }
-          }
-          if ($hits) { throw "Potential private path or credential pattern: $($hits -join ', ')" }
+        run: ./scripts/Test-ReleasePrivacy.ps1
       - name: Clean JVM and Forge build
         shell: pwsh
         run: gradle --no-daemon clean build
       - name: Loader-neutral boundary
         shell: pwsh
         run: |
-          $hits = git grep -n -E 'net\.minecraft|net\.minecraftforge|com\.simibubi' -- core/src/main adapter-api/src/main
-          $grepExit = $LASTEXITCODE
-          if ($grepExit -eq 0) { throw "Loader-specific import in pure module: $hits" }
-          if ($grepExit -ne 1) { throw "git grep failed with exit code $grepExit" }
-          exit 0
+          $hits = rg -n 'net\.minecraft|net\.minecraftforge|com\.simibubi' core/src/main adapter-api/src/main
+          if ($LASTEXITCODE -eq 0) { throw "Loader-specific import in pure module: $hits" }
       - name: Release artifact checks
         shell: pwsh
         run: |
+          ./scripts/Test-DistributionBoundary.ps1
+          ./scripts/Test-ReleaseVersion.ps1
           $jar = Get-Item forge-create-1.20.1/build/libs/steve-industrial-agent-0.1.0-alpha.1.jar
-          $entries = & jar tf $jar.FullName
-          foreach ($required in @(
-            'META-INF/mods.toml',
-            'META-INF/LICENSE-steve-industrial-agent',
-            'META-INF/NOTICE-steve-industrial-agent'
-          )) {
-            if ($entries -notcontains $required) { throw "Missing JAR entry: $required" }
-          }
-          $hash = (Get-FileHash $jar.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($jar.Name)" | Set-Content SHA256SUMS.txt
+          (Get-FileHash $jar.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $jar.Name | Set-Content SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: steve-industrial-agent-0.1.0-alpha.1-ci

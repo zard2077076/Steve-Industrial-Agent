@@ -127,9 +127,9 @@ class RecoveryCheckpointTest {
         assertThat(milling.graph().nodeIds()).hasSize(6);
         assertThat(milling.graph().portIds()).hasSize(10);
         assertThat(milling.graph().edgeIds()).hasSize(5);
-        assertThat(pressing.graph().nodeIds()).hasSize(9);
-        assertThat(pressing.graph().portIds()).hasSize(20);
-        assertThat(pressing.graph().edgeIds()).hasSize(10);
+        assertThat(pressing.graph().nodeIds()).hasSize(27);
+        assertThat(pressing.graph().portIds()).hasSize(28);
+        assertThat(pressing.graph().edgeIds()).hasSize(14);
         assertThat(shiftedMilling).isEqualTo(milling);
         assertThat(shiftedPressing).isEqualTo(pressing);
         assertThat(pressing.fingerprint()).isNotEqualTo(milling.fingerprint());
